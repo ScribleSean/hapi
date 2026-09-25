@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { ThreadPrimitive, unstable_useThreadMessageIds, useAuiState } from '@assistant-ui/react'
+import { ThreadPrimitive, useAuiState } from '@assistant-ui/react'
+import { groupActivityMessages } from './messages/activityGroups'
 import type { ComponentProps } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import type { ApiClient } from '@/api/client'
@@ -374,17 +375,28 @@ type ThreadMessageComponents = ComponentProps<typeof ThreadPrimitive.Unstable_Me
  * unmount removed rows without consulting a stale index.
  */
 export function ThreadMessagesById({ components }: { components: ThreadMessageComponents }) {
-    const messageIds = unstable_useThreadMessageIds()
+    const messages = useAuiState((s) => s.thread.messages)
+    const groups = groupActivityMessages(messages)
 
     return (
         <>
-            {messageIds.map((messageId) => (
+            {groups.map((group) => {
+                const content = group.ids.map((messageId) => (
                 <ThreadPrimitive.Unstable_MessageById
                     key={messageId}
                     messageId={messageId}
                     components={components}
                 />
-            ))}
+                ))
+                return group.activity ? (
+                    <details key={group.ids[0]} data-hapi-share-exclude="true" className="min-w-0 text-xs text-[var(--app-hint)]">
+                        <summary className="cursor-pointer py-1 px-1 rounded focus-visible:ring-2 focus-visible:ring-[var(--app-link)]">
+                            Activity{group.running ? ' · Working…' : group.failed ? ' · Error' : ''}
+                        </summary>
+                        <div className="pl-2 border-l border-[var(--app-divider)]">{content}</div>
+                    </details>
+                ) : <div key={group.ids[0]} className="contents">{content}</div>
+            })}
         </>
     )
 }

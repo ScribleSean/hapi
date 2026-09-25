@@ -1,0 +1,36 @@
+# Custom HAPI continuation
+
+Checkpoint: September 25, 2026. Branch `feature/unified-workspace-20260925`, based on upstream `97cf69b` (0.30.7). The fork's main branch may contain newer upstream changes; this feature branch preserves the tested deployment baseline. Do not assume it has been rebased onto main.
+
+## Implemented
+
+- Flat Bots sidebar by default, with machine filters, existing names and pinned/recent ordering. Display settings can restore folder grouping.
+- Browse defaults to a project home organized by agent. Existing project paths come from session metadata and remain unchanged. All folders retains the original browser. New project names suggest `AI-Projects/<agent>/<name>` below the selected workspace root, then open the existing setup form for review.
+- Consecutive tool-only and reasoning messages share a collapsed Activity disclosure. User messages, text replies, pending questions/approvals and generated media remain visible. Details are retained, not removed.
+- Ordinary composer sends prefer steering where supported and active. Save once, then steer the saved message. Failed steering does not resend. Scheduled sends, explicit queue, scratchlists and retry semantics remain unchanged.
+- CLI/MCP peer messaging now attempts the same save-once/steer sequence for thinking, supported peers. Acknowledgements distinguish steered, already invoked and saved without steering confirmation. Idle/unsupported targets use normal delivery. Never describe failed or ambiguous steering as confirmed.
+
+## Deployment boundary
+
+The web changes are deployed on an existing Windows-hosted private installation. The official hub remains on loopback 3006; a separate Caddy frontend on loopback 3007 serves the custom web build and proxies API/WebSocket traffic to the hub. Native client binaries were not rebuilt.
+
+The new CLI peer-steering change is source work, not yet installed into the running Windows/Mac CLI/MCP processes. Updating the web alone cannot activate it. Coordinate a safe CLI rollout on both hosts after active work is checkpointed; preserve the existing hub database and credentials. Do not restart unrelated agents to deploy this branch.
+
+Private host paths, startup configuration and personal context belong in the owner's private context repository, not here. No session databases, provider logins, raw chat exports, browser state, local logs, generated assets or credentials should be committed.
+
+## Verification
+
+Web TypeScript and focused suites covering sidebar, composer steering, acknowledgement races, project paths, collapsed activity, reasoning and transcript rewind passed. Production web build passed under Node 22.22.0. Existing font/chunk/PWA warnings remain. Live desktop and 390px mobile-width checks covered the sidebar, projects and steering; the latest Activity refinement was checked in the browser, not independently on a physical iPhone.
+
+For CLI changes, run `bun run --cwd cli typecheck` and focused Vitest tests for `src/modules/pingPeer/pingPeer.test.ts` and `src/commands/pingPeer.test.ts`. CLI test setup starts an isolated test hub; it must not use production credentials or data. See AGENTS.md and package README files for the normal checks.
+
+CLI TypeScript passed and those 29 focused tests passed at this checkpoint, including successful steering, an already-invoked race, rejection and timeout without duplicate sends.
+
+## Pending
+
+1. Install and verify peer-steering changes on both execution hosts; test supported active, idle and unsupported peers without duplicate delivery.
+2. Shared UI preferences: currently browser-local. Implement authenticated, namespace-scoped allowlisted preference sync; never sync all localStorage because it contains credentials and transient state.
+3. Embedded browser: feasibility discussed only. First verify a supported browser-control tool, then evaluate a reusable remote-browser viewer. No browser service has been added.
+4. Preserve current project files; no bulk folder migration. Project home only indexes known session paths, not every repository on disk.
+
+Resume by reading AGENTS.md, this file and the relevant changed module. Inspect Git and runtime state before edits. Source availability is not proof that a running host loaded the change.

@@ -203,12 +203,13 @@ export const ReasoningGroup: FC<HappyReasoningGroupProps> = ({
     }, [])
 
     return (
-        <div data-hapi-share-exclude="true" className="aui-reasoning-group my-3 overflow-hidden rounded-2xl bg-[var(--app-reasoning-bg)]">
+        <div data-hapi-share-exclude="true" className="aui-reasoning-group my-0.5 overflow-hidden rounded-md">
             <button
                 type="button"
+                aria-expanded={isOpen}
                 onClick={handleToggle}
                 className={cn(
-                    'flex w-full items-center gap-1.5 px-3.5 py-2.5 text-left text-xs font-medium',
+                    'flex min-h-8 w-full items-center gap-1.5 px-1 py-2 text-left text-xs',
                     'text-[var(--app-hint)] hover:text-[var(--app-fg)]',
                     'transition-colors cursor-pointer select-none'
                 )}

@@ -7,6 +7,8 @@ import { I18nProvider } from '@/lib/i18n-context'
 import { ToastProvider } from '@/lib/toast-context'
 import { SessionList } from './SessionList'
 
+beforeEach(() => localStorage.setItem('hapi-bots-view', 'false'))
+
 afterEach(() => cleanup())
 
 function makeSession(overrides: Partial<SessionSummary> & { id: string }): SessionSummary {
@@ -65,6 +67,7 @@ function renderSessionList(sessions: SessionSummary[]) {
 describe('SessionList mark all as read', () => {
     beforeEach(() => {
         localStorage.clear()
+        localStorage.setItem('hapi-bots-view', 'false')
     })
 
     it('only shows the independent action when unread sessions exist', () => {

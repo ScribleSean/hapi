@@ -9,6 +9,8 @@
  */
 
 import axios, { type AxiosInstance } from 'axios'
+import { randomUUID } from 'node:crypto'
+import { isSteeringSupportedForSession } from '@hapi/protocol/modes'
 import { extractAssistantPlainText, isObject } from '@hapi/protocol'
 import { normalizeSessionIdPrefix } from '@hapi/protocol/sessionCitation'
 import { configuration } from '@/configuration'
@@ -65,6 +67,8 @@ export type PingPeerResult = {
     sessionId: string
     name: string
     resumed: boolean
+    delivery?: 'steered' | 'invoked' | 'saved'
+    deliveryNote?: string
 }
 
 export type ListPeerSessionsOptions = {
@@ -345,11 +349,12 @@ async function sendMessage(
     jwt: string,
     sessionId: string,
     message: string,
-    http: AxiosInstance
+    http: AxiosInstance,
+    localId?: string
 ): Promise<void> {
     const response = await http.post(
         `${apiUrl}/api/sessions/${encodeURIComponent(sessionId)}/messages`,
-        { text: message },
+        { text: message, ...(localId ? { localId } : {}) },
         {
             headers: authHeaders(jwt),
             timeout: 30_000,
@@ -516,12 +521,40 @@ export async function pingPeer(options: PingPeerOptions): Promise<PingPeerResult
     }
 
     onProgress?.(`sending message (${message.length} chars)...`)
-    await sendMessage(apiUrl, jwt, matched.id, message, http)
+    const preferSteer = live.thinking === true && isSteeringSupportedForSession(live.metadata)
+    const localId = preferSteer ? randomUUID() : undefined
+    await sendMessage(apiUrl, jwt, matched.id, message, http, localId)
+
+    // Persist once, then steer the same queued message. Never resend after an
+    // ambiguous steering failure: it may already have reached the active turn.
+    let delivery: PingPeerResult['delivery']
+    let deliveryNote: string | undefined
+    if (localId) {
+        try {
+            const response = await http.post(
+                `${apiUrl}/api/sessions/${encodeURIComponent(matched.id)}/messages/${encodeURIComponent(localId)}/steer`,
+                {},
+                { headers: authHeaders(jwt), timeout: 30_000, validateStatus: () => true }
+            )
+            if (response.status >= 200 && response.status < 300
+                && (response.data?.status === 'steered' || response.data?.status === 'invoked')) {
+                delivery = response.data.status
+            } else {
+                delivery = 'saved'
+                deliveryNote = 'Message saved; steering was not confirmed. Do not resend.'
+            }
+        } catch {
+            delivery = 'saved'
+            deliveryNote = 'Message saved; steering acknowledgement unavailable. Do not resend.'
+        }
+        onProgress?.(deliveryNote ?? `delivery=${delivery}`)
+    }
 
     return {
         sessionId: matched.id,
         name,
-        resumed
+        resumed,
+        ...(delivery ? { delivery, ...(deliveryNote ? { deliveryNote } : {}) } : {})
     }
 }
 

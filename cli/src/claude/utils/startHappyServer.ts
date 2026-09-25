@@ -313,7 +313,7 @@ function createHapiMcpServer(
                 content: [
                     {
                         type: 'text' as const,
-                        text: `Delivered to ${result.sessionId}${result.resumed ? ' (resumed)' : ''} (${result.name})`,
+                        text: `Delivered to ${result.sessionId}${result.resumed ? ' (resumed)' : ''} (${result.name})${result.delivery ? `; ${result.delivery}` : ''}${result.deliveryNote ? `. ${result.deliveryNote}` : ''}`,
                     },
                 ],
                 isError: false,

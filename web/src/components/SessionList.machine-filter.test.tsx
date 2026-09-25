@@ -7,6 +7,8 @@ import { I18nProvider } from '@/lib/i18n-context'
 import { ToastProvider } from '@/lib/toast-context'
 import { SessionList } from './SessionList'
 
+beforeEach(() => localStorage.setItem('hapi-bots-view', 'false'))
+
 const SEARCH_LABEL = 'Search sessions (title, path, Agent, machine name, ID, and more)'
 const SEARCH_PLACEHOLDER = 'Search title/path/Agent/machine/ID…'
 
@@ -86,6 +88,7 @@ const multiMachineSessions = [
 describe('SessionList machine filter', () => {
     beforeEach(() => {
         window.localStorage.clear()
+        localStorage.setItem('hapi-bots-view', 'false')
     })
 
     it('hides the filter bar when all sessions are on a single machine', () => {
@@ -155,5 +158,23 @@ describe('SessionList machine filter', () => {
         expect(screen.getByText('No sessions match your filters.')).toBeTruthy()
         expect(screen.queryByTitle('/work/hapi')).toBeNull()
         expect(screen.queryByTitle('/work/docs')).toBeNull()
+    })
+})
+
+
+describe('Bots view', () => {
+    it('defaults to named bots, pinned first, with working machine filters', () => {
+        localStorage.clear()
+        renderSessionList([
+            makeSession({ id: 'recent', updatedAt: 900, metadata: { path: '/work/recent', name: 'Research Bot', machineId: 'machine-1' } }),
+            makeSession({ id: 'pinned', pinned: true, updatedAt: 1, metadata: { path: '/work/pinned', name: 'Professor Bot', machineId: 'machine-2' } }),
+        ])
+        const pinned = screen.getByText('Professor Bot')
+        const recent = screen.getByText('Research Bot')
+        expect(pinned.compareDocumentPosition(recent) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+        expect(screen.queryByText('work/recent')).toBeNull()
+        fireEvent.click(screen.getByRole('button', { name: /Teemo \(1\)/ }))
+        expect(screen.queryByText('Research Bot')).toBeNull()
+        expect(screen.getByText('Professor Bot')).toBeTruthy()
     })
 })

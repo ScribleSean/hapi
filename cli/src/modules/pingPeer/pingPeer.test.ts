@@ -63,6 +63,32 @@ describe('resolveSessionByPrefix', () => {
 })
 
 describe('pingPeer', () => {
+    it.each(['steered', 'invoked', 'failed', 'timeout'])('prefers active-turn steering and preserves one saved message: %s', async (status) => {
+        const id = 'active-codex'
+        let savedId = ''
+        let sends = 0
+        const session = { id, active: true, thinking: true, metadata: { flavor: 'codex' } }
+        const http = createHttpMock({
+            get: async (url) => ({ status: 200, data: url.endsWith('/sessions') ? { sessions: [session] } : { session } }),
+            post: async (url, body) => {
+                if (url.endsWith('/auth')) return { status: 200, data: { token: 'jwt' } }
+                if (url.endsWith('/messages')) {
+                    sends++
+                    savedId = (body as { localId: string }).localId
+                    expect(savedId).toBeTruthy()
+                    return { status: 200, data: { ok: true } }
+                }
+                expect(url.endsWith(`/messages/${savedId}/steer`)).toBe(true)
+                if (status === 'timeout') throw new Error('timeout')
+                return { status: 200, data: { status } }
+            }
+        })
+        const result = await pingPeer({ sessionIdPrefix: id, message: 'Update', apiUrl: 'http://localhost:3006', accessToken: 'test', http: http as never })
+        expect(sends).toBe(1)
+        expect(result.delivery).toBe(status === 'steered' || status === 'invoked' ? status : 'saved')
+        if (status === 'failed' || status === 'timeout') expect(result.deliveryNote).toContain('Do not resend')
+    })
+
     let nowMs: number
     let sleepCalls: number[]
 

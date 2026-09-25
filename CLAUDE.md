@@ -1,0 +1,1 @@
+Read `AGENTS.md` for repository instructions and `CUSTOMIZATION-HANDOFF.md` for the current custom branch, completed checks, deployment boundaries and remaining work. Do not load or commit runtime credentials, raw sessions or personal context into this public repository.

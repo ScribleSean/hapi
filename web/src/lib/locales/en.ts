@@ -1,4 +1,6 @@
 export default {
+  'settings.display.botsView': 'Bots view',
+  'settings.display.botsView.desc': 'One list of named bots, pinned first. Turn off to show project folders.',
   // Loading states
   'loading': 'Loading…',
   'authorizing': 'Authorizing…',

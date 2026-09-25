@@ -79,6 +79,8 @@ function renderReasoning(text: string, statusType: 'complete' | 'running' = 'com
 describe('ReasoningGroup', () => {
     beforeEach(() => {
         window.localStorage.clear()
+        // Streaming expansion remains available as an explicit preference.
+        window.localStorage.setItem('hapi-reasoning-collapsed', 'false')
         cleanup()
         mockMessage.status = null
         mockMessage.content = []

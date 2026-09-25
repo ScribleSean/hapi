@@ -22,6 +22,7 @@ import { SessionChat } from '@/components/SessionChat'
 import { SessionList } from '@/components/SessionList'
 import { NewSession } from '@/components/NewSession'
 import { WorkspaceBrowser } from '@/components/WorkspaceBrowser'
+import { ProjectHome, PROJECT_AGENTS, type ProjectAgent } from '@/components/ProjectHome'
 import { LoadingState } from '@/components/LoadingState'
 import { useAppContext } from '@/lib/app-context'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
@@ -583,6 +584,12 @@ function SessionPage() {
         isSending,
         sendSettlement,
     } = useSendMessage(api, sessionId, {
+        onSteerError: (sentSessionId, error) => addToast({
+            title: 'Message saved; steering unavailable',
+            body: error,
+            sessionId: sentSessionId,
+            url: window.location.href,
+        }),
         isSessionThinking: session?.thinking ?? false,
         onSuccess: (sentSessionId) => {
             clearDraftsAfterSend(sentSessionId, sessionId)
@@ -902,7 +909,7 @@ function NewSessionPage() {
     const queryClient = useQueryClient()
     const { machines, isLoading: machinesLoading, error: machinesError } = useMachines(api, true)
     const { t } = useTranslation()
-    const { directory: initialDirectory, machineId: initialMachineId, shareTransferId } = newSessionRoute.useSearch()
+    const { directory: initialDirectory, machineId: initialMachineId, agent: initialAgent, shareTransferId } = newSessionRoute.useSearch()
 
     const handleCancel = useCallback(() => {
         if (shareTransferId) {
@@ -980,6 +987,7 @@ function NewSessionPage() {
                     onSuccess={handleSuccess}
                     onChooseFolder={handleChooseFolder}
                     initialDirectory={initialDirectory}
+                    initialAgent={initialAgent}
                     initialMachineId={initialMachineId}
                 />
             </div>
@@ -993,14 +1001,16 @@ function BrowsePage() {
     const goBack = useAppGoBack()
     const { machines, isLoading: machinesLoading } = useMachines(api, true)
     const { t } = useTranslation()
+    const { sessions } = useSessions(api)
+    const [allFolders, setAllFolders] = useState(false)
     const { machineId: initialMachineId, shareTransferId } = browseRoute.useSearch()
 
-    const handleStartSession = useCallback((machineId: string, directory: string) => {
+    const handleStartSession = useCallback((machineId: string, directory: string, agent?: ProjectAgent) => {
         navigate({
             to: '/sessions/new',
             search: shareTransferId
-                ? { directory, machineId, shareTransferId }
-                : { directory, machineId }
+                ? { directory, machineId, shareTransferId, agent }
+                : { directory, machineId, agent }
         })
     }, [navigate, shareTransferId])
 
@@ -1019,14 +1029,18 @@ function BrowsePage() {
                 <div className="flex-1 font-semibold">{t('browse.title')}</div>
             </div>
 
+            <div className="flex gap-2 border-b border-[var(--app-divider)] p-3">
+                <button type="button" aria-pressed={!allFolders} onClick={() => setAllFolders(false)} className="rounded-lg px-3 py-2 text-sm">Projects</button>
+                <button type="button" aria-pressed={allFolders} onClick={() => setAllFolders(true)} className="rounded-lg px-3 py-2 text-sm text-[var(--app-hint)]">All folders</button>
+            </div>
             <div className="flex-1 min-h-0">
-                <WorkspaceBrowser
+                {!allFolders ? <ProjectHome machines={machines} sessions={sessions} initialMachineId={initialMachineId} onStartSession={handleStartSession} /> : <WorkspaceBrowser
                     api={api}
                     machines={machines}
                     machinesLoading={machinesLoading}
                     onStartSession={handleStartSession}
                     initialMachineId={initialMachineId}
-                />
+                />}
             </div>
         </div>
     )
@@ -1141,6 +1155,7 @@ const sessionFileRoute = createRoute({
 })
 
 type NewSessionSearch = {
+    agent?: ProjectAgent
     directory?: string
     machineId?: string
     shareTransferId?: string
@@ -1151,6 +1166,7 @@ const newSessionRoute = createRoute({
     path: 'new',
     validateSearch: (search: Record<string, unknown>): NewSessionSearch => {
         const result: NewSessionSearch = {}
+        if (PROJECT_AGENTS.some(([id]) => id === search.agent)) result.agent = search.agent as ProjectAgent
         if (typeof search.directory === 'string' && search.directory) {
             result.directory = search.directory
         }

@@ -1794,6 +1794,9 @@ function SessionChatInner(props: SessionChatProps) {
         const routedToScratchlist = shouldRouteToScratchlist(scratchlistMode, attachments, scheduledAt)
         const deliveryMode = resolveMessageDeliveryMode({
             agentFlavor,
+            canSteer: isSteeringSupportedForSession(props.session.metadata)
+                && (agentFlavor === 'pi' ? props.session.thinking : props.session.agentState?.steeringActive === true)
+                && !controlledByUser,
             // Do not use assistant-ui's broader `isRunning` here: a
             // child-agent run is not the Pi main session's steer target.
             isSessionThinking: props.session.thinking,
@@ -1815,7 +1818,7 @@ function SessionChatInner(props: SessionChatProps) {
             updatePendingSchedule(null)
             setForceScrollToken((token) => token + 1)
         }
-    }, [agentFlavor, onSendForComposer, props.session.thinking, scratchlistMode, updatePendingSchedule])
+    }, [agentFlavor, onSendForComposer, props.session.thinking, props.session.metadata, props.session.agentState?.steeringActive, controlledByUser, scratchlistMode, updatePendingSchedule])
 
     const attachmentAdapter = useMemo(() => {
         if (props.session.active && scratchlistMode) {

@@ -102,6 +102,7 @@ type UseSendMessageOptions = {
     ) => void | Promise<void | SessionResolution>
     onBlocked?: (reason: BlockedReason) => void
     onSuccess?: (sessionId: string) => void
+    onSteerError?: (sessionId: string, error: string) => void
     onError?: (info: SendErrorInfo) => void
     isSessionThinking?: boolean
 }
@@ -222,20 +223,35 @@ export function useSendMessage(
                 input.localId,
                 input.attachments,
                 input.scheduledAt,
-                input.deliveryMode,
+                'queue',
             )
+            // Save once before requesting steering. Never turn a steering failure
+            // into a failed send: the message is already stored by the hub.
+            if (input.deliveryMode === 'steer' && input.scheduledAt == null) {
+                try {
+                    const result = await api.steerMessage(input.sessionId, input.localId)
+                    if (result.status === 'failed') return result.error ?? 'Steering unavailable'
+                } catch (error) {
+                    return error instanceof Error ? error.message : 'Steering unavailable'
+                }
+            }
+            return undefined
         },
         onMutate: async (input) => {
             const successStatus = isSessionThinkingRef.current ? 'queued' as const : 'sent' as const
             appendOptimisticMessage(input.sessionId, createOptimisticMessage(input, 'sending'))
             return { successStatus }
         },
-        onSuccess: (_, input, context) => {
+        onSuccess: (steerError, input, context) => {
+            if (steerError) options?.onSteerError?.(input.sessionId, steerError)
             setSendSettlement({ attemptId: input.localId, status: 'success' })
+            const consumed = getMessageWindowState(input.sessionId).messages.some(
+                (message) => message.localId === input.localId && typeof message.invokedAt === 'number'
+            )
             updateMessageStatus(
                 input.sessionId,
                 input.localId,
-                context?.successStatus ?? 'sent'
+                consumed ? 'sent' : context?.successStatus ?? 'sent'
             )
             haptic.notification('success')
             options?.onSuccess?.(input.sessionId)

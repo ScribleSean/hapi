@@ -61,3 +61,20 @@ describe('resolveMessageDeliveryMode', () => {
         expect(resolveMessageDeliveryMode({ ...base, intent: retryIntent })).toBe('queue')
     })
 })
+
+
+describe('default steering', () => {
+    const active = { agentFlavor: 'codex', isSessionThinking: true, canSteer: true, intent: 'default' as const }
+    it('steers a normal send to an active capable session', () => {
+        expect(resolveMessageDeliveryMode(active)).toBe('steer')
+    })
+    it.each([
+        { ...active, canSteer: false },
+        { ...active, isSessionThinking: false },
+        { ...active, intent: 'queue' as const },
+        { ...active, scheduledAt: 123 },
+        { ...active, routesToScratchlist: true },
+    ])('queues when steering is not appropriate', (input) => {
+        expect(resolveMessageDeliveryMode(input)).toBe('queue')
+    })
+})

@@ -11,6 +11,9 @@ import { CodeBlock } from '@/components/CodeBlock'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
 import { MessageStatusIndicator } from '@/components/AssistantChat/messages/MessageStatusIndicator'
 import { ToolCard } from '@/components/ToolCard/ToolCard'
+import { CompactActivity } from './CompactActivity'
+import { isAskUserQuestionToolName } from '@/components/ToolCard/askUserQuestion'
+import { isRequestUserInputToolName } from '@/components/ToolCard/requestUserInput'
 import { useHappyChatContext } from '@/components/AssistantChat/context'
 import { CliOutputBlock } from '@/components/CliOutputBlock'
 import { UserBubbleContent, getUserBubbleClassName, shouldShowMessageStatus } from '@/components/AssistantChat/messages/user-bubble'
@@ -338,7 +341,34 @@ function HappyNestedBlockList(props: {
     )
 }
 
+export function needsToolAttention(block: ToolCallBlock): boolean {
+    return block.tool.state === 'pending'
+        || block.tool.permission?.status === 'pending'
+        || ((isAskUserQuestionToolName(block.tool.name) || isRequestUserInputToolName(block.tool.name))
+            && block.tool.state === 'running')
+        || block.children.some((child) => isToolCallBlock(child) && needsToolAttention(child))
+}
+
 export function HappyToolMessage(props: ToolCallMessagePartProps) {
+    const artifact = props.artifact
+    if (isGeneratedImageBlock(artifact)) return <ExpandedToolMessage {...props} />
+    const tools = isToolGroupBlock(artifact) ? artifact.tools
+        : isToolCallBlock(artifact) ? [artifact] : []
+    return (
+        <CompactActivity
+            count={tools.length || 1}
+            running={tools.some((block) => block.tool.state === 'running')
+                || (tools.length === 0 && props.status.type === 'running')}
+            failed={props.isError || tools.some((block) => block.tool.state === 'error')}
+            needsAttention={tools.some(needsToolAttention)
+                || ((isAskUserQuestionToolName(props.toolName) || isRequestUserInputToolName(props.toolName)) && props.status.type === 'running')}
+        >
+            <ExpandedToolMessage {...props} />
+        </CompactActivity>
+    )
+}
+
+function ExpandedToolMessage(props: ToolCallMessagePartProps) {
     const ctx = useHappyChatContext()
     const artifact = props.artifact
 

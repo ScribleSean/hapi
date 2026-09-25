@@ -4,7 +4,7 @@ import type { MessageDeliveryMode } from '@hapi/protocol'
  * The one-shot UI intent associated with a composer submission.  It is not
  * the wire delivery mode: `default` is resolved against the current session
  * state at the SessionChat boundary, while `queue` is an explicit operator
- * request not to steer an in-flight Pi turn.
+ * request not to steer an in-flight turn.
  */
 export type ComposerSendIntent = 'default' | 'queue'
 
@@ -40,24 +40,15 @@ export function getRestoredComposerSendIntent(
     return getRetryDeliveryMode(deliveryMode)
 }
 
-/**
- * Resolve the web composer intent into the durable message delivery mode.
- *
- * Every composer submission queues by default — for every flavor. The Pi
- * automatic steer (deliveryMode 'steer' while the main session is thinking)
- * was removed in favor of the explicit per-queued-message Steer action
- * (issue #1466), matching Codex/Claude behavior: a mid-turn message waits,
- * and the operator presses Steer to deliver it into the running turn.
- * Scheduled messages, scratchlist additions, and retries always queued
- * already.
- */
+/** Default to steering only when the current session has a live target. */
 export function resolveMessageDeliveryMode(input: {
     agentFlavor: string | null | undefined
     isSessionThinking: boolean
+    canSteer?: boolean
     intent: ComposerSendIntent
     scheduledAt?: number | null
     routesToScratchlist?: boolean
 }): MessageDeliveryMode {
-    void input
-    return 'queue'
+    return input.canSteer && input.isSessionThinking && input.intent === 'default'
+        && input.scheduledAt == null && !input.routesToScratchlist ? 'steer' : 'queue'
 }

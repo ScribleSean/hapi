@@ -1,3 +1,4 @@
+import { useBotsView } from '@/hooks/useBotsView'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { SessionListScrollAnchor } from './SessionListScrollAnchor'
 import type { SessionSummary } from '@/types/api'
@@ -1239,6 +1240,7 @@ export function SessionList(props: {
     // Transient unread lens — not a Settings preference. Cleared on reload; rows drop as they're seen.
     const [showUnreadOnly, setShowUnreadOnly] = useState(false)
     const { pinInProgressSessions } = usePinInProgressSessions()
+    const { botsView } = useBotsView()
     const { machineFilter, setMachineFilter } = useSessionListMachineFilter()
     const showDetailedStatus = sessionListStatusMode === 'detailed'
     const [searchQuery, setSearchQuery] = useState('')
@@ -2044,7 +2046,26 @@ export function SessionList(props: {
                     </div>
                 ) : null}
 
-                {globalPinnedSessions.length > 0 ? (
+                {botsView ? [...machineFilteredSessions].sort((a, b) => {
+                    const pinned = Number(Boolean(b.globalPinned || b.pinned)) - Number(Boolean(a.globalPinned || a.pinned))
+                    if (pinned) return pinned
+                    if (searchScoreIndex && hasTextQuery) return compareSessionsBySearchRelevance(a, b, searchScoreIndex)
+                    return b.updatedAt - a.updatedAt || a.id.localeCompare(b.id)
+                }).map((session) => (
+                    <SessionItem
+                        key={session.id}
+                        session={session}
+                        onSelect={props.onSelect}
+                        showPath={false}
+                        api={api}
+                        titleSuggestionAvailable={titleSuggestionAvailable}
+                        selected={session.id === selectedSessionId}
+                        showDetailedStatus={showDetailedStatus}
+                        inRunningSection
+                        machineLabel={resolveMachineLabel(session.metadata?.machineId ?? null)}
+                        lastSeenVersion={lastSeenVersion}
+                    />
+                )) : <>{globalPinnedSessions.length > 0 ? (
                     <div key="pinned-section">
                         <div
                             className="group/pinned flex min-w-0 w-full select-none cursor-pointer items-center gap-2 rounded-lg py-1.5 pl-2 pr-2 transition-colors hover:bg-[var(--app-secondary-bg)]"
@@ -2116,7 +2137,7 @@ export function SessionList(props: {
                     bucketKeys: ['active', 'idle'],
                 })}
                 {groups.map(renderDirectoryGroup)}
-                {actionOnlyGroups.map(renderActionOnlyGroupHeader)}
+                {actionOnlyGroups.map(renderActionOnlyGroupHeader)}</>}
             </SessionListScrollAnchor>
             </div>
             </div>

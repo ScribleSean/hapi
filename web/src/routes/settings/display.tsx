@@ -1,3 +1,4 @@
+import { useBotsView } from '@/hooks/useBotsView'
 import { useEffect, useState } from 'react'
 import { useTranslation } from '@/lib/use-translation'
 import { getAppearanceOptions, useAppearance } from '@/hooks/useTheme'
@@ -140,6 +141,7 @@ export default function SettingsDisplayPage() {
     const { sessionListStatusMode, setSessionListStatusMode } = useSessionListStatusMode()
     const { showActiveSessionsOnly, setShowActiveSessionsOnly } = useShowActiveSessionsOnly()
     const { pinInProgressSessions, setPinInProgressSessions } = usePinInProgressSessions()
+    const { botsView, setBotsView } = useBotsView()
     const { appBadgeEnabled, setAppBadgeEnabled } = useAppBadgePreference()
     const { openExternalLinksInNewTab, setOpenExternalLinksInNewTab } = useOpenExternalLinksInNewTab()
     const { preferences: sessionHeaderMetadata, setPreference: setSessionHeaderMetadata } = useSessionHeaderMetadata()
@@ -176,6 +178,7 @@ export default function SettingsDisplayPage() {
             </SettingsSection>
 
             <SettingsSection title={t('settings.display.sessions')}>
+                <SettingsSwitch label={t('settings.display.botsView')} description={t('settings.display.botsView.desc')} checked={botsView} onChange={setBotsView} />
                 <SessionPreviewLimitControl />
                 <SettingsSwitch label={t('settings.display.activeSessionsOnly')} description={t('settings.display.activeSessionsOnly.desc')} checked={showActiveSessionsOnly} onChange={setShowActiveSessionsOnly} />
                 <SettingsSwitch label={t('settings.display.pinInProgressSessions')} description={t('settings.display.pinInProgressSessions.desc')} checked={pinInProgressSessions} onChange={setPinInProgressSessions} />

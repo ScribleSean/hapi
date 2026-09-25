@@ -90,6 +90,7 @@ export function NewSession(props: {
     onSuccess: (sessionId: string) => void
     onCancel: () => void
     onChooseFolder?: (args: { machineId: string | null; directory: string }) => void
+    initialAgent?: AgentType
     initialDirectory?: string
     initialMachineId?: string
 }) {
@@ -104,7 +105,7 @@ export function NewSession(props: {
     const [directory, setDirectory] = useState(props.initialDirectory ?? '')
     const [suppressSuggestions, setSuppressSuggestions] = useState(false)
     const [isDirectoryFocused, setIsDirectoryFocused] = useState(false)
-    const [agent, setAgent] = useState<AgentType>(loadPreferredAgent)
+    const [agent, setAgent] = useState<AgentType>(() => props.initialAgent ?? loadPreferredAgent())
     // Snapshot taken once at mount, before any savePreferredAgent() call this
     // component makes can overwrite the stored agent. savePreferredAgent()
     // runs on every agent change (below), so reading loadPreferredAgent()
@@ -220,7 +221,7 @@ export function NewSession(props: {
 
     const restoredFromBrowseRef = useRef(false)
     useEffect(() => {
-        if (restoredFromBrowseRef.current) {
+        if (restoredFromBrowseRef.current || props.initialAgent) {
             return
         }
         if (!shouldRestoreNewSessionFormDraft({
@@ -262,6 +263,7 @@ export function NewSession(props: {
         setWorktreeName(draft.worktreeName)
         clearNewSessionFormDraft()
     }, [
+        props.initialAgent,
         props.initialDirectory,
         props.initialMachineId,
         machineId
