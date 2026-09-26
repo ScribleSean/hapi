@@ -351,7 +351,7 @@ async function sendMessage(
     message: string,
     http: AxiosInstance,
     localId?: string
-): Promise<void> {
+): Promise<{ status?: string } | undefined> {
     const response = await http.post(
         `${apiUrl}/api/sessions/${encodeURIComponent(sessionId)}/messages`,
         { text: message, ...(localId ? { localId } : {}) },
@@ -362,7 +362,7 @@ async function sendMessage(
         }
     )
     if (response.status >= 200 && response.status < 300 && response.data?.ok === true) {
-        return
+        return response.data.delivery
     }
     const detail = typeof response.data?.error === 'string'
         ? response.data.error
@@ -523,13 +523,20 @@ export async function pingPeer(options: PingPeerOptions): Promise<PingPeerResult
     onProgress?.(`sending message (${message.length} chars)...`)
     const preferSteer = live.thinking === true && isSteeringSupportedForSession(live.metadata)
     const localId = preferSteer ? randomUUID() : undefined
-    await sendMessage(apiUrl, jwt, matched.id, message, http, localId)
+    const hubDelivery = await sendMessage(apiUrl, jwt, matched.id, message, http, localId)
 
     // Persist once, then steer the same queued message. Never resend after an
     // ambiguous steering failure: it may already have reached the active turn.
     let delivery: PingPeerResult['delivery']
     let deliveryNote: string | undefined
-    if (localId) {
+    if (hubDelivery) {
+        // The hub persisted and steered in one request. A second RPC can race
+        // with its acknowledgement, so never repeat delivery from the client.
+        delivery = hubDelivery.status === 'steered' || hubDelivery.status === 'invoked'
+            ? hubDelivery.status : 'saved'
+        if (delivery === 'saved') deliveryNote = 'Message saved; steering was not confirmed. Do not resend.'
+        onProgress?.(deliveryNote ?? `delivery=${delivery}`)
+    } else if (localId) {
         try {
             const response = await http.post(
                 `${apiUrl}/api/sessions/${encodeURIComponent(matched.id)}/messages/${encodeURIComponent(localId)}/steer`,

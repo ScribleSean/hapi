@@ -63,6 +63,23 @@ describe('resolveSessionByPrefix', () => {
 })
 
 describe('pingPeer', () => {
+    it.each(['steered', 'invoked', 'failed'])('uses the hub delivery receipt without a second steer: %s', async (status) => {
+        const session = { id: 'hub-steer', active: true, thinking: true, metadata: { flavor: 'codex' } }
+        let sends = 0
+        const http = createHttpMock({
+            get: async (url) => ({ status: 200, data: url.endsWith('/sessions') ? { sessions: [session] } : { session } }),
+            post: async (url) => {
+                if (url.endsWith('/auth')) return { status: 200, data: { token: 'jwt' } }
+                expect(url.endsWith('/messages')).toBe(true)
+                sends++
+                return { status: 200, data: { ok: true, delivery: { status } } }
+            }
+        })
+        const result = await pingPeer({ sessionIdPrefix: session.id, message: 'Update', apiUrl: 'http://localhost:3006', accessToken: 'test', http: http as never })
+        expect(sends).toBe(1)
+        expect(result.delivery).toBe(status === 'failed' ? 'saved' : status)
+    })
+
     it.each(['steered', 'invoked', 'failed', 'timeout'])('prefers active-turn steering and preserves one saved message: %s', async (status) => {
         const id = 'active-codex'
         let savedId = ''

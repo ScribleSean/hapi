@@ -1,5 +1,7 @@
 import { Hono } from 'hono'
+import { randomUUID } from 'node:crypto'
 import { MessagesQuerySchema, QueuedStateRequestSchema, SendMessageRequestSchema } from '@hapi/protocol'
+import { isSteeringSupportedForSession } from '@hapi/protocol/modes'
 import type { SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 import { requireSessionFromParam, requireSyncEngine } from './guards'
@@ -141,14 +143,40 @@ export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ error: 'Message requires text or attachments' }, 400)
         }
 
+        // Older peer MCP/CLI clients send only { text }. Assign an identity at
+        // ingress so native echoes reconcile with this row instead of creating
+        // a second user message. Keep caller IDs for idempotent retries.
+        const localId = parsed.data.localId ?? randomUUID()
+        const preferSteer = parsed.data.deliveryMode !== 'queue'
+            && parsed.data.scheduledAt == null
+            && isSteeringSupportedForSession(sessionResult.session.metadata)
+            && !(sessionResult.session.agentState?.controlledByUser === true
+                && !sessionResult.session.metadata?.capabilities?.concurrentClients)
+
         await engine.sendMessage(sessionId, {
             text: parsed.data.text,
-            localId: parsed.data.localId,
+            localId,
             attachments: parsed.data.attachments,
             sentFrom: 'webapp',
             scheduledAt: parsed.data.scheduledAt,
-            deliveryMode: parsed.data.deliveryMode
+            // Use one delivery path, including Pi: persist/emit once, then
+            // promote that exact queue item through the native steering RPC.
+            deliveryMode: preferSteer ? 'queue' : parsed.data.deliveryMode
         })
+        if (preferSteer) {
+            // The RPC also handles a turn ending between send and steer. It
+            // returns invoked if normal idle delivery already consumed the row.
+            // Never POST another message on a failed or ambiguous acknowledgement.
+            try {
+                const delivery = await engine.steerQueuedMessage(sessionId, localId)
+                return c.json({ ok: true, localId, delivery })
+            } catch {
+                return c.json({ ok: true, localId, delivery: {
+                    status: 'failed', localId,
+                    error: 'Message saved; steering acknowledgement unavailable. Do not resend.'
+                } })
+            }
+        }
         return c.json({ ok: true })
     })
 

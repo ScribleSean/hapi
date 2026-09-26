@@ -11,13 +11,13 @@ Checkpoint: September 25, 2026. Branch `feature/unified-workspace-20260925`, bas
 - Browse defaults to a project home organized by agent. Existing project paths come from session metadata and remain unchanged. All folders retains the original browser. New project names suggest `AI-Projects/<agent>/<name>` below the selected workspace root, then open the existing setup form for review.
 - Consecutive tool-only and reasoning messages share a collapsed Activity disclosure. User messages, text replies, pending questions/approvals and generated media remain visible. Details are retained, not removed.
 - Ordinary composer sends prefer steering where supported and active. Save once, then steer the saved message. Failed steering does not resend. Scheduled sends, explicit queue, scratchlists and retry semantics remain unchanged.
-- CLI/MCP peer messaging now attempts the same save-once/steer sequence for thinking, supported peers. Acknowledgements distinguish steered, already invoked and saved without steering confirmation. Idle/unsupported targets use normal delivery. Never describe failed or ambiguous steering as confirmed.
+- The hub now assigns missing message IDs and defaults immediate sends without an explicit queue preference to native steering for supported remote sessions. This covers already-running peer CLI/MCP clients that send only text. Explicit queue, schedules and capability boundaries are preserved. The source CLI consumes the hub's delivery receipt without sending a second steer; its old-hub fallback remains save-once/steer-once. Never describe failed or ambiguous steering as confirmed or resend blindly.
 
 ## Deployment boundary
 
-The web changes are deployed on an existing Windows-hosted private installation. The official hub remains on loopback 3006; a separate Caddy frontend on loopback 3007 serves the custom web build and proxies API/WebSocket traffic to the hub. Native client binaries were not rebuilt.
+The web changes and patched hub are deployed on an existing Windows-hosted private installation. A separately compiled hub runs on loopback 3006; Caddy on loopback 3007 serves the custom web build and proxies API/WebSocket traffic. Native client and runner binaries remain unchanged.
 
-The new CLI peer-steering change is source work, not yet installed into the running Windows/Mac CLI/MCP processes. Updating the web alone cannot activate it. Coordinate a safe CLI rollout on both hosts after active work is checkpointed; preserve the existing hub database and credentials. Do not restart unrelated agents to deploy this branch.
+The hub deployment makes steering the default for existing Windows/Mac peer clients without relaunching agents. All seven active sessions reconnected, the private HTTPS health check passed, and Windows startup now selects the patched hub. An installed MCP peer-send self-test reached an active Codex turn automatically: exactly one user row, a non-null ID, an invocation receipt, and no queued or indeterminate copy. The source CLI receipt improvements are not loaded into older in-process MCP servers; those may still report only "Delivered". No separate live Mac-origin model turn or unsupported-provider steering was tested. Existing duplicate historical rows were not deleted or replayed.
 
 Private host paths, startup configuration and personal context belong in the owner's private context repository, not here. No session databases, provider logins, raw chat exports, browser state, local logs, generated assets or credentials should be committed.
 
@@ -27,19 +27,19 @@ Web TypeScript and focused suites covering sidebar, composer steering, acknowled
 
 For CLI changes, run `bun run --cwd cli typecheck` and focused Vitest tests for `src/modules/pingPeer/pingPeer.test.ts` and `src/commands/pingPeer.test.ts`. CLI test setup starts an isolated test hub; it must not use production credentials or data. See AGENTS.md and package README files for the normal checks.
 
-CLI TypeScript passed and those 29 focused tests passed at this checkpoint, including successful steering, an already-invoked race, rejection and timeout without duplicate sends.
+Hub and CLI TypeScript passed. The latest peer-focused run passed 32 CLI tests and 36 hub route/steering tests, covering legacy text-only sends, stable IDs, one steering path for Pi, stale thinking metadata, already-invoked delivery, explicit queue/schedules, capability gates and ambiguous acknowledgements without resend. The broader message-service run passed its delivery assertions but has one Windows EBUSY failure while deleting a temporary SQLite restart-test directory; do not report that broader suite as fully passing. A compiled hub also passed isolated startup/authentication checks before activation.
 
 ## Pending
 
-1. Install and verify peer-steering changes on both execution hosts; test supported active, idle and unsupported peers without duplicate delivery. Include the reported duplicate-message observation below.
+1. Preserve the hub steering default during upgrades. True native steering is available for Codex, Pi and Cursor ACP; unsupported harnesses retain normal delivery. A provider upgrade needs its own capability and receipt checks. Do not promise steering for Claude from this change.
 2. Shared UI preferences: currently browser-local. Implement authenticated, namespace-scoped allowlisted preference sync; never sync all localStorage because it contains credentials and transient state.
 3. Embedded browser: feasibility discussed only. First verify a supported browser-control tool, then evaluate a reusable remote-browser viewer. No browser service has been added.
 4. Preserve current project files; no bulk folder migration. Project home only indexes known session paths, not every repository on disk.
 
 ### Peer delivery observation to verify
 
-Reported around 02:10 UTC on September 26, 2026: one MCP peer-send call per target appeared twice as identical user messages when later inspected on both a Mac-owned and Windows-owned Codex session. The reporter observed one sender call per target and no ambiguous retry. This is an unverified observation, not evidence yet of duplicate persistence or execution.
+Reported around 02:10 UTC on September 26, 2026: one MCP peer-send call per target appeared twice as identical user messages when later inspected on both a Mac-owned and Windows-owned Codex session. Read-only receipts showed web-origin rows with null localId paired with CLI-origin user rows with generated IDs. The shared Codex adapter generates an ID when ingress supplies none, preventing echo reconciliation. The hub now supplies that ID before emitting; the live self-test produced one consumed row. This establishes the duplicate storage cause, not that the previous messages caused duplicate model execution.
 
-At the next safe peer-steering verification, first inspect existing receipts read-only. Correlate the single sender invocation and localId with hub message IDs/sequences, native thread entries, any import/echo reconciliation, inspect-peer output, and rendered rows. Determine whether duplication occurs in storage, history reconciliation, inspection/rendering, or actual model invocation. Check installed CLI/MCP versions against the persist-once/steer source change; prior unit tests do not establish the deployed behavior. Use isolated fixtures for reproduction, including active steering, idle delivery, reconnect/replay and timeout paths. Require one logical user message and at most one invocation per send. Do not resend the original coordination message, restart unrelated sessions, or publish raw message contents, credentials or runtime databases.
+For future regressions, correlate message IDs, native receipts and sender call counts before retrying. Require one logical user message and at most one invocation per send. Do not resend original coordination messages, restart unrelated sessions, or publish raw message contents, credentials or runtime databases.
 
 Resume by reading AGENTS.md, this file and the relevant changed module. Inspect Git and runtime state before edits. Source availability is not proof that a running host loaded the change.

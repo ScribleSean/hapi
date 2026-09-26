@@ -22,6 +22,7 @@ type GetMessagesPage = SyncEngine['getMessagesPage']
 
 function createApp(opts: {
     active?: boolean
+    session?: Record<string, unknown>
     sendMessage?: (sessionId: string, payload: unknown) => Promise<void>
     getMessagesPage?: GetMessagesPage
     getQueuedState?: (sessionId: string, localIds: string[]) => {
@@ -67,7 +68,7 @@ function createApp(opts: {
         resolveSessionAccess: () => ({
             ok: true,
             sessionId: 'session-1',
-            session: { id: 'session-1', active: opts.active !== false }
+            session: { id: 'session-1', active: opts.active !== false, ...opts.session }
         }),
         sendMessage,
         getQueuedState,
@@ -85,6 +86,80 @@ function createApp(opts: {
 
     return { app, sentMessages, queuedStateCalls }
 }
+
+describe('peer messages default to steering at the hub', () => {
+    const post = (app: ReturnType<typeof createApp>['app'], body: unknown) => app.request(
+        '/api/sessions/session-1/messages', {
+            method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body)
+        }
+    )
+
+    it.each(['codex', 'cursor', 'pi'])('saves legacy %s peer sends once with the same ID used for steering', async (flavor) => {
+        const calls: string[] = []
+        let savedId: string | undefined
+        const { app } = createApp({
+            session: { thinking: true, metadata: { flavor } },
+            sendMessage: async (_, payload) => {
+                calls.push('save')
+                const sent = payload as { localId: string; deliveryMode: string }
+                savedId = sent.localId
+                expect(savedId).toBeTruthy()
+                expect(sent.deliveryMode).toBe('queue') // no second Pi live-steer path
+            },
+            steerQueuedMessage: async (_, id) => {
+                calls.push('steer')
+                expect(id).toBe(savedId!)
+                return { status: 'steered', localId: id }
+            }
+        })
+        const response = await post(app, { text: 'peer update' })
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ ok: true, localId: savedId, delivery: { status: 'steered', localId: savedId } })
+        expect(calls).toEqual(['save', 'steer'])
+    })
+
+    it.each(['invoked', 'failed', 'timeout'])('never resends on idle consumption, rejection or ambiguous ACK: %s', async (status) => {
+        let steers = 0
+        const { app, sentMessages } = createApp({
+            // Missing/stale thinking must not force peer updates into the queue.
+            session: { metadata: { flavor: 'codex' } },
+            steerQueuedMessage: async (_, id) => {
+                steers++
+                if (status === 'timeout') throw new Error('timeout')
+                return { status, localId: id }
+            }
+        })
+        const response = await post(app, { text: 'peer update', localId: 'caller-id' })
+        const body = await response.json() as { delivery: { status: string; error?: string } }
+        expect(body.delivery.status).toBe(status === 'timeout' ? 'failed' : status)
+        if (status === 'timeout') expect(body.delivery.error).toContain('Do not resend')
+        expect(sentMessages).toHaveLength(1)
+        expect(sentMessages[0]!.payload).toMatchObject({ localId: 'caller-id' })
+        expect(steers).toBe(1)
+    })
+
+    it.each([
+        { body: { deliveryMode: 'queue' }, session: { metadata: { flavor: 'codex' } } },
+        { body: { scheduledAt: Date.now() + 60_000 }, session: { metadata: { flavor: 'codex' } } },
+        { body: {}, session: { metadata: { flavor: 'claude' } } },
+        { body: {}, session: { metadata: { flavor: 'cursor', cursorSessionProtocol: 'stream-json' } } },
+        { body: {}, session: { metadata: { flavor: 'codex' }, agentState: { controlledByUser: true } } },
+    ])('respects explicit queue, schedule and native capability boundaries: %j', async ({ body, session }) => {
+        const { app, sentMessages } = createApp({
+            session,
+            steerQueuedMessage: async () => { throw new Error('must not steer') }
+        })
+        const response = await post(app, { text: 'update', localId: 'caller-id', ...body })
+        expect(await response.json()).toEqual({ ok: true })
+        expect(sentMessages).toHaveLength(1)
+    })
+
+    it('rejects inactive sessions before saving or steering', async () => {
+        const { app, sentMessages } = createApp({ active: false })
+        expect((await post(app, { text: 'update' })).status).toBe(409)
+        expect(sentMessages).toHaveLength(0)
+    })
+})
 
 describe('GET /api/sessions/:id/messages', () => {
     it('uses latest mode by default and returns the full page metadata', async () => {
