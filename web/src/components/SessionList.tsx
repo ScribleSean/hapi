@@ -59,6 +59,8 @@ import { useSessionListMachineFilter } from '@/hooks/useSessionListMachineFilter
 import { useTransientScrollbar } from '@/hooks/useTransientScrollbar'
 import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
 import { SessionRowSummary } from '@/components/SessionRowSummary'
+import { SessionReasoningControl } from '@/components/SessionReasoningControl'
+import { SessionConnections } from '@/components/SessionConnections'
 import { Spinner } from '@/components/Spinner'
 import { transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
 import { useToast } from '@/lib/toast-context'
@@ -1062,11 +1064,12 @@ function SessionItem(props: {
     )
     return (
         <>
+            <div className="group/reasoning-row relative">
             <button
                 type="button"
                 {...longPressHandlers}
                 data-session-scroll-anchor
-                className={`session-list-item group/session-row flex w-full flex-col gap-1 py-2 pl-2.5 pr-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none rounded-lg ${selected ? 'bg-[var(--app-secondary-bg)]' : ''}`}
+                className={`session-list-item group/session-row flex w-full flex-col gap-1 py-2 pl-2.5 pr-10 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none rounded-lg ${selected ? 'bg-[var(--app-secondary-bg)]' : ''}`}
                 style={{ WebkitTouchCallout: 'none' }}
                 aria-current={selected ? 'page' : undefined}
                 aria-describedby={describedBy}
@@ -1085,6 +1088,8 @@ function SessionItem(props: {
                     machineLabel={machineLabel}
                 />
             </button>
+            <SessionReasoningControl api={api} sessions={[s]} />
+            </div>
 
             <SessionActionMenu
                 isOpen={menuOpen}
@@ -1920,6 +1925,10 @@ export function SessionList(props: {
 
     return (
         <div className="flex min-h-0 w-full flex-1 flex-col">
+            <div className="flex shrink-0 flex-wrap px-2">
+                <SessionReasoningControl api={api} sessions={props.sessions} bulk />
+                <SessionConnections api={api} sessions={props.sessions} machines={machinesById} machineLabels={machineLabelsById} onSelect={props.onSelect} />
+            </div>
             <div className="session-list-scrollbar-offset mx-auto w-full max-w-content shrink-0">
             {showHeaderRow ? (
                 <div className="flex items-center gap-1 px-2 py-1">
