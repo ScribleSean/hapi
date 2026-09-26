@@ -31,9 +31,15 @@ CLI TypeScript passed and those 29 focused tests passed at this checkpoint, incl
 
 ## Pending
 
-1. Install and verify peer-steering changes on both execution hosts; test supported active, idle and unsupported peers without duplicate delivery.
+1. Install and verify peer-steering changes on both execution hosts; test supported active, idle and unsupported peers without duplicate delivery. Include the reported duplicate-message observation below.
 2. Shared UI preferences: currently browser-local. Implement authenticated, namespace-scoped allowlisted preference sync; never sync all localStorage because it contains credentials and transient state.
 3. Embedded browser: feasibility discussed only. First verify a supported browser-control tool, then evaluate a reusable remote-browser viewer. No browser service has been added.
 4. Preserve current project files; no bulk folder migration. Project home only indexes known session paths, not every repository on disk.
+
+### Peer delivery observation to verify
+
+Reported around 02:10 UTC on September 26, 2026: one MCP peer-send call per target appeared twice as identical user messages when later inspected on both a Mac-owned and Windows-owned Codex session. The reporter observed one sender call per target and no ambiguous retry. This is an unverified observation, not evidence yet of duplicate persistence or execution.
+
+At the next safe peer-steering verification, first inspect existing receipts read-only. Correlate the single sender invocation and localId with hub message IDs/sequences, native thread entries, any import/echo reconciliation, inspect-peer output, and rendered rows. Determine whether duplication occurs in storage, history reconciliation, inspection/rendering, or actual model invocation. Check installed CLI/MCP versions against the persist-once/steer source change; prior unit tests do not establish the deployed behavior. Use isolated fixtures for reproduction, including active steering, idle delivery, reconnect/replay and timeout paths. Require one logical user message and at most one invocation per send. Do not resend the original coordination message, restart unrelated sessions, or publish raw message contents, credentials or runtime databases.
 
 Resume by reading AGENTS.md, this file and the relevant changed module. Inspect Git and runtime state before edits. Source availability is not proof that a running host loaded the change.
