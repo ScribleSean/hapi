@@ -66,6 +66,7 @@ export class AcpSdkBackend implements AgentBackend {
     private stderrErrorHandler: ((error: AcpStderrError) => void) | null = null;
     private readonly pendingPermissions = new Map<string, PendingPermission>();
     private readonly sessionModelsMetadata = new Map<string, AcpSessionModelsMetadata>();
+    private readonly sessionModeIds = new Map<string, string[]>();
     private readonly sessionConfigOptions = new Map<string, AcpConfigOptionDescriptor[]>();
     private readonly sessionInfoRefreshTimers = new Map<string, ReturnType<typeof setTimeout>>();
     private readonly initialAvailableCommands = new Set<string>();
@@ -277,6 +278,10 @@ export class AcpSdkBackend implements AgentBackend {
 
     getConfigOptionByCategory(sessionId: string, category: string): AcpConfigOptionDescriptor | undefined {
         return this.sessionConfigOptions.get(sessionId)?.find((option) => option.category === category);
+    }
+
+    getSessionModeIds(sessionId: string): readonly string[] | undefined {
+        return this.sessionModeIds.get(sessionId);
     }
 
     registerExtensionRequestHandler(
@@ -928,6 +933,7 @@ export class AcpSdkBackend implements AgentBackend {
         this.foregroundPromptRequests = 0;
         this.isProcessingMessage = false;
         this.sessionModelsMetadata.clear();
+        this.sessionModeIds.clear();
         this.initialAvailableCommands.clear();
         this.sessionAvailableCommands.clear();
         this.autoPermissionModeEnabled = null;
@@ -1312,6 +1318,12 @@ export class AcpSdkBackend implements AgentBackend {
 
 
     private captureSessionMetadata(sessionId: string, response: unknown): void {
+        if (isObject(response) && isObject(response.modes) && Array.isArray(response.modes.availableModes)) {
+            this.sessionModeIds.set(sessionId, response.modes.availableModes
+                .filter((mode): mode is Record<string, unknown> => isObject(mode))
+                .map((mode) => asString(mode.id) ?? '')
+                .filter(Boolean));
+        }
         this.captureSessionModelsMetadata(sessionId, response);
         this.captureSessionConfigOptions(sessionId, response);
         this.captureAvailableCommands(sessionId, response);

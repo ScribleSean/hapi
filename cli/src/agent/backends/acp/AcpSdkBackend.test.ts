@@ -20,6 +20,26 @@ type BackendStatics = {
 };
 
 const backendStatics = AcpSdkBackend as unknown as BackendStatics;
+
+describe('advertised ACP mode IDs', () => {
+    it.each(['newSession', 'loadSession'] as const)('retains opaque mode identifiers from %s', async (method) => {
+        const backend = new AcpSdkBackend({ command: 'copilot' });
+        const uri = 'https://agentclientprotocol.com/protocol/session-modes#agent';
+        const internals = backend as unknown as {
+            transport: { sendRequest: () => Promise<unknown>; close: () => Promise<void> };
+        };
+        internals.transport = {
+            sendRequest: async () => ({ sessionId: 's1', modes: { availableModes: [
+                { id: uri, name: 'Agent' }, { id: 'plan', name: 'Plan' }, { name: 'malformed' }, null
+            ] } }),
+            close: async () => {}
+        };
+        expect(backend.getSessionModeIds('s1')).toBeUndefined();
+        await backend[method]({ sessionId: 's1', cwd: '/tmp/test', mcpServers: [] });
+        expect(backend.getSessionModeIds('s1')).toEqual([uri, 'plan']);
+    });
+});
+
 const originalStatics = {
     updateQuietPeriodMs: backendStatics.UPDATE_QUIET_PERIOD_MS,
     updateDrainTimeoutMs: backendStatics.UPDATE_DRAIN_TIMEOUT_MS,

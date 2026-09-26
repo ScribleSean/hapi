@@ -345,7 +345,14 @@ export class CopilotRemoteLauncher extends RemoteLauncherBase {
         // `interactive` is the legacy TUI name for the ACP default `agent` mode
         // (spawned without --mode); map it to the valid ACP session mode id so
         // runtime switches back to Interactive leave the backend in sync.
-        const backendMode = agentMode === 'interactive' ? 'agent' : agentMode;
+        const modeName = agentMode === 'interactive' ? 'agent' : agentMode;
+        const advertisedModes = backend.getSessionModeIds?.(sessionId);
+        const backendMode = advertisedModes === undefined ? modeName : advertisedModes.find(
+            (id) => id === modeName || id === `https://agentclientprotocol.com/protocol/session-modes#${modeName}`
+        );
+        if (!backendMode) {
+            throw new Error(`Copilot did not advertise a ${modeName} mode; refusing to select another mode`);
+        }
         try {
             await backend.setMode(sessionId, backendMode);
             this.setModeSupported = true;

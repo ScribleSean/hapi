@@ -6,6 +6,7 @@ import type { AgentMessage } from '@/agent/types';
 type LauncherInternals = {
     backend: {
         setMode: (sessionId: string, mode: string) => Promise<void>;
+        getSessionModeIds?: (sessionId: string) => readonly string[] | undefined;
         setModel?: (sessionId: string, model: string) => Promise<void>;
         setConfigOption?: (sessionId: string, configId: string, value: string) => Promise<void>;
         getConfigOptionByCategory?: (sessionId: string, category: string) => {
@@ -40,6 +41,26 @@ function createLauncher(
 }
 
 describe('CopilotRemoteLauncher.applyAgentMode', () => {
+    it.each(['interactive', 'plan', 'autopilot'] as const)('uses the advertised ACP URI for %s without changing permissions', async (mode) => {
+        const setMode = vi.fn().mockResolvedValue(undefined);
+        const { launcher, internals } = createLauncher(setMode);
+        const modes = ['agent', 'plan', 'autopilot'].map(name => `https://agentclientprotocol.com/protocol/session-modes#${name}`);
+        internals.backend!.getSessionModeIds = () => modes;
+        await launcher.applyAgentMode(mode);
+        expect(setMode).toHaveBeenCalledOnce();
+        expect(setMode).toHaveBeenCalledWith('copilot-session', modes[mode === 'interactive' ? 0 : mode === 'plan' ? 1 : 2]);
+        expect(internals.currentAgentMode).toBe(mode);
+    });
+
+    it('does not substitute another advertised mode when the requested mode is unavailable', async () => {
+        const setMode = vi.fn();
+        const { launcher, internals } = createLauncher(setMode);
+        internals.backend!.getSessionModeIds = () => ['https://agentclientprotocol.com/protocol/session-modes#autopilot'];
+        await expect(launcher.applyAgentMode('plan')).rejects.toThrow('did not advertise a plan mode');
+        expect(setMode).not.toHaveBeenCalled();
+        expect(internals.currentAgentMode).toBe('interactive');
+    });
+
     it('attributes usage to the active Copilot model', () => {
         const { internals, session } = createLauncher(vi.fn().mockResolvedValue(undefined));
         internals.currentBackendModel = 'gpt-5.6';
