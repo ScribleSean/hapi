@@ -40,6 +40,11 @@ describe('codexModelAdvertisesFastTier', () => {
     it('matches fast tokens case-insensitively', () => {
         expect(codexModelAdvertisesFastTier('m', [{ id: 'm', isDefault: true, serviceTiers: ['Fast'] }])).toBe(true)
     })
+
+    it('accepts the native priority tier without requiring its display label', () => {
+        expect(codexModelAdvertisesFastTier('m', [{ id: 'm', isDefault: true, serviceTiers: ['priority'] }])).toBe(true)
+        expect(codexModelAdvertisesFastTier('m', [{ id: 'm', isDefault: true, serviceTiers: ['not-fast'] }])).toBe(false)
+    })
 })
 
 describe('isFastServiceTier', () => {

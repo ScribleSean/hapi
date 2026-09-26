@@ -8,7 +8,6 @@ import { useFue } from '@/lib/use-fue'
 import { FueCallout, FueDot } from '@/components/Fue'
 import { Children, isValidElement, useRef, useState, type ReactElement, type ReactNode, type Ref } from 'react'
 import { useComposerToolbarLayout, type ComposerToolbarItemId, type ComposerToolbarLayout } from '@/hooks/useComposerToolbarLayout'
-import { useNarrowViewport } from '@/hooks/useNarrowViewport'
 import type { ComposerSendIntent } from '@/lib/messageDelivery'
 
 function ToolbarItemSlot(props: { item: ComposerToolbarItemId; children: ReactNode }) {
@@ -655,12 +654,9 @@ export function ComposerButtons(props: {
 }) {
     const { t } = useTranslation()
     const { layout } = useComposerToolbarLayout()
-    const isNarrowViewport = useNarrowViewport()
-    // Narrow viewports collapse the model/effort value buttons into the settings
-    // sheet, so the gear must stay reachable even when a persisted layout hides
-    // it (otherwise no session-settings trigger remains). Wide layouts keep
-    // honoring the user's hidden choice.
-    const effectiveLayout: ComposerToolbarLayout = isNarrowViewport && layout.hidden.includes('settings')
+    // Keep a complete settings entry point on every viewport. A saved layout
+    // may hide both effort and settings, leaving only the model picker.
+    const effectiveLayout: ComposerToolbarLayout = layout.hidden.includes('settings')
         ? {
             ...layout,
             hidden: layout.hidden.filter((item) => item !== 'settings'),

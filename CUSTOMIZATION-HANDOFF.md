@@ -4,6 +4,7 @@ Checkpoint: September 25, 2026. Branch `feature/unified-workspace-20260925`, bas
 
 ## Implemented
 
+- Model settings have persistent Models / Effort & speed / All settings navigation on desktop and mobile, and the settings entry point survives hidden-toolbar preferences. Existing per-harness catalogs and capability checks still govern available choices. Codex Fast also recognizes the native priority tier without requiring a display-name alias. Live Codex catalog and 1280px/390px browser checks confirmed Ultra and Fast are reachable; other harnesses retain their existing discovery and mutation paths, not newly verified provider entitlements.
 - Flat Bots sidebar by default, with machine filters, existing names and pinned/recent ordering. Display settings can restore folder grouping.
 - Browse defaults to a project home organized by agent. Existing project paths come from session metadata and remain unchanged. All folders retains the original browser. New project names suggest `AI-Projects/<agent>/<name>` below the selected workspace root, then open the existing setup form for review.
 - Consecutive tool-only and reasoning messages share a collapsed Activity disclosure. User messages, text replies, pending questions/approvals and generated media remain visible. Details are retained, not removed.

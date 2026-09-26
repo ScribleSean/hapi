@@ -137,6 +137,36 @@ function renderComposer(agentFlavor: string, overrides: Partial<Parameters<typeo
 }
 
 describe('HappyComposer generic model/effort value buttons', () => {
+    it.each([false, true])('keeps Ultra and Fast reachable with a hidden settings/effort layout (mobile=%s)', (mobile) => {
+        runtime.narrowViewport = mobile
+        runtime.toolbarLayout = { mode: 'split', left: ['attachment'], right: ['model'], hidden: ['settings', 'effort'] }
+        const reasoning = vi.fn()
+        const speed = vi.fn()
+        renderComposer('codex', {
+            model: 'gpt-6-astra',
+            availableModelOptions: [{ value: 'gpt-6-astra', label: 'GPT-6-Astra' }],
+            availableModelReasoningEffortOptions: [{ value: 'medium' }, { value: 'ultra' }],
+            onModelReasoningEffortChange: reasoning,
+            onServiceTierChange: speed,
+        })
+        fireEvent.click(screen.getByRole('button', { name: mobile ? 'Settings' : 'GPT-6-Astra' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Effort & speed' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Ultra' }))
+        expect(reasoning).toHaveBeenCalledWith('ultra')
+        fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Effort & speed' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Fast' }))
+        expect(speed).toHaveBeenCalledWith('fast')
+    })
+
+    it('lets a Claude model-only picker navigate to its effort controls', () => {
+        renderComposer('claude')
+        fireEvent.click(screen.getByRole('button', { name: 'Sonnet 4' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Effort & speed' }))
+        expect(screen.getByText('Effort')).toBeTruthy()
+        expect(screen.queryByText('Fast Mode')).toBeNull()
+    })
+
     afterEach(() => {
         cleanup()
         runtime.setSnapshot = null

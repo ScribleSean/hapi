@@ -1736,7 +1736,7 @@ export function HappyComposer(props: {
         const sheetModelReasoningEffortSettings = showModelReasoningEffortSettings && sheetEffortAreaOn
         const sheetEffortSettings = showEffortSettings && sheetEffortAreaOn
         const sheetPermissionSettings = showPermissionSettings && sheetOthersOn
-        const sheetFastModeSettings = showFastModeSettings && sheetOthersOn
+        const sheetFastModeSettings = showFastModeSettings && sheetEffortAreaOn
         const sheetCollaborationSettings = showCollaborationSettings && sheetOthersOn
         const sheetCopilotAgentModeSettings = showCopilotAgentModeSettings && sheetOthersOn
         const sheetModelAreaSettings = sheetModelSettings || sheetModelEffortSettings || sheetModelReasoningEffortSettings || sheetEffortSettings
@@ -1744,6 +1744,15 @@ export function HappyComposer(props: {
         if (showSettings && (sheetCollaborationSettings || sheetCopilotAgentModeSettings || sheetPermissionSettings || sheetModelSettings || sheetModelEffortSettings || sheetModelReasoningEffortSettings || sheetEffortSettings || sheetFastModeSettings)) {
             return (
                 <div ref={settingsOverlayRef} className={`${overlayPositionClass} w-full`}>
+                    <div role="group" aria-label="Model settings sections" className="flex flex-wrap gap-1 rounded-t-lg border border-[var(--app-divider)] bg-[var(--app-bg)] p-2">
+                        {showModelSettings || showModelEffortSettings ? (
+                            <button type="button" aria-pressed={settingsSection === 'model'} className="rounded px-3 py-2 text-xs aria-pressed:bg-[var(--app-secondary-bg)]" onClick={() => setSettingsSection('model')}>Models</button>
+                        ) : null}
+                        {showModelReasoningEffortSettings || showEffortSettings || showFastModeSettings ? (
+                            <button type="button" aria-pressed={settingsSection === 'effort'} className="rounded px-3 py-2 text-xs aria-pressed:bg-[var(--app-secondary-bg)]" onClick={() => setSettingsSection('effort')}>Effort &amp; speed</button>
+                        ) : null}
+                        <button type="button" aria-pressed={settingsSection === null} className="rounded px-3 py-2 text-xs aria-pressed:bg-[var(--app-secondary-bg)]" onClick={() => setSettingsSection(null)}>All settings</button>
+                    </div>
                     <FloatingOverlay maxHeight={320}>
                         {sheetModelSettings ? (
                             <div className="py-2">
