@@ -56,7 +56,7 @@ import { initializeSessionLastSeen } from '@/lib/sessionLastSeen'
 import { useSelectedSessionSeen } from '@/hooks/useSelectedSessionSeen'
 import { useSessionBrowserTitle } from '@/hooks/useSessionBrowserTitle'
 import { useSessionAutoConnect } from '@/hooks/useSessionAutoConnect'
-import { useSessionRouteEntry, type SessionRouteEntry } from '@/hooks/useSessionRouteEntry'
+import { useSessionRouteEntry } from '@/hooks/useSessionRouteEntry'
 import { clearCodexImportedSession } from '@/lib/codexImportedSessions'
 import { getSupersedingSessionId, prepareFollowSupersedingSession, shouldFollowSupersedingSession } from '@/routes/sessions/followSupersedingSession'
 import { migrateSuppressedSendError } from '@/lib/suppressed-send-error'
@@ -518,13 +518,12 @@ function SessionPage() {
         resolvedSessionRef.current = null
     }, [session?.id, session?.active])
     const resolveSessionId = useCallback(async (currentSessionId: string) => {
-        const sourceRouteEntry = routeEntry
         if (!api || !session || session.active) {
-            return { sessionId: currentSessionId, resumed: false, routeEntry: sourceRouteEntry }
+            return { sessionId: currentSessionId, resumed: false }
         }
         const cached = resolvedSessionRef.current
         if (cached?.source === currentSessionId) {
-            return { sessionId: await cached.target, resumed: true, routeEntry: sourceRouteEntry }
+            return { sessionId: await cached.target, resumed: true }
         }
         if (!inactiveSessionCanResume(session, messages.length, cursorChatStoreStatus?.onDisk)) {
             throw new ApiError(
@@ -536,7 +535,7 @@ function SessionPage() {
         try {
             const target = api.resumeSession(currentSessionId, { permissionMode: session.permissionMode ?? undefined })
             resolvedSessionRef.current = { source: currentSessionId, target }
-            return { sessionId: await target, resumed: true, routeEntry: sourceRouteEntry }
+            return { sessionId: await target, resumed: true }
         } catch (error) {
             if (resolvedSessionRef.current?.source === currentSessionId) {
                 resolvedSessionRef.current = null
@@ -556,9 +555,9 @@ function SessionPage() {
                     'session_inactive',
                 )
         }
-    }, [api, session, messages.length, cursorChatStoreStatus?.onDisk, t, addToast, routeEntry])
+    }, [api, session, messages.length, cursorChatStoreStatus?.onDisk, t, addToast])
 
-    const handleSessionResolved = useCallback((resolvedSessionId: string, sourceRouteEntry?: SessionRouteEntry) => {
+    const handleSessionResolved = useCallback((resolvedSessionId: string) => {
         if (session) {
             if (resolvedSessionId !== session.id) {
                 retargetSharePendingTransfer(session.id, resolvedSessionId)
@@ -576,7 +575,7 @@ function SessionPage() {
         }
         // The resume itself and its draft/cache handoff are still useful after
         // leaving the route. Only navigation is route-entry scoped.
-        if (sourceRouteEntry && !isCurrentRouteEntry(sourceRouteEntry)) return
+        if (!isCurrentRouteEntry(routeEntry)) return
         navigate({
             to: '/sessions/$sessionId',
             params: { sessionId: resolvedSessionId },
@@ -591,7 +590,7 @@ function SessionPage() {
             )
             void syncTailMessages(api, resolvedSessionId).catch(() => {})
         }
-    }, [api, navigate, queryClient, session, isCurrentRouteEntry])
+    }, [api, navigate, queryClient, session, isCurrentRouteEntry, routeEntry])
 
     const owningMachineId = session?.metadata?.machineId?.trim() || null
     const owningMachineOnline = owningMachineId
@@ -677,7 +676,7 @@ function SessionPage() {
             await transferComposerDraftThenNavigate(
                 sessionId,
                 resolvedSessionId,
-                () => handleSessionResolved(resolvedSessionId, context.routeEntry as SessionRouteEntry | undefined),
+                () => handleSessionResolved(resolvedSessionId),
                 [],
                 // assistant-ui clears composer text without awaiting this path;
                 // keep the submitted snapshot so deferred hydration still has it.
@@ -866,10 +865,7 @@ function SessionPage() {
             onCancelLoadMore={cancelLoadMoreMessages}
             onSend={sendMessage}
             resolveSessionIdForUpload={async (id) => (await resolveSessionId(id)).sessionId}
-            onUploadSessionResolved={(resolvedSessionId, sourceRouteEntry) => (
-                handleSessionResolved(resolvedSessionId, sourceRouteEntry as SessionRouteEntry | undefined)
-            )}
-            routeEntry={routeEntry}
+            onUploadSessionResolved={handleSessionResolved}
             onViewModeChange={setViewMode}
             onRetryMessage={retryMessage}
             autocompleteSuggestions={getAutocompleteSuggestions}
