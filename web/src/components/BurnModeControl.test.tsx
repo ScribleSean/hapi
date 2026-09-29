@@ -57,14 +57,23 @@ describe('BurnModeControl', () => {
         const toggle = screen.getByRole('switch')
         fireEvent.click(toggle)
         await waitFor(() => expect(updateBurnMode).toHaveBeenCalledWith(false, 5))
-        await waitFor(() => expect(screen.getByText('Restoring 1 pending')).toBeInTheDocument())
+        await waitFor(() => expect(screen.getByText('Restoring 1')).toBeInTheDocument())
     })
 
-    it('shows session names, unsupported results, saved defaults, and a mobile-safe details affordance', async () => {
+    it('uses a reduced-motion-safe flame treatment while enabled', async () => {
+        const getBurnMode = vi.fn().mockResolvedValue(state({ enabled: true }))
+        renderControl({ getBurnMode, updateBurnMode: vi.fn(), retryBurnMode: vi.fn() } as unknown as ApiClient)
+        const toggle = await screen.findByRole('switch', { name: /Turn Burn off/i })
+        expect(toggle).toHaveClass('focus-visible:ring-orange-500')
+        expect(toggle.querySelector('.motion-reduce\\:animate-none')).not.toBeNull()
+        expect(screen.getByText('Burn').parentElement).toHaveClass('shadow-[0_0_20px_rgba(249,115,22,0.18)]')
+    })
+
+    it('shows unavailable separately from repair failures and keeps a mobile-safe details affordance', async () => {
         const getBurnMode = vi.fn().mockResolvedValue(state({ enabled: true, sessions: [{ sessionId: 'one', status: 'unsupported', detail: 'Codex capability unavailable', previous: { modelReasoningEffort: null, serviceTier: null } }] }))
         renderControl({ getBurnMode, updateBurnMode: vi.fn(), retryBurnMode: vi.fn() } as unknown as ApiClient)
-        await screen.findByRole('button', { name: /Burn status: 1 needs attention/i })
-        fireEvent.click(screen.getByRole('button', { name: /Burn status: 1 needs attention/i }))
+        await screen.findByRole('button', { name: /Burn status: 1 unavailable/i })
+        fireEvent.click(screen.getByRole('button', { name: /Burn status: 1 unavailable/i }))
         expect(screen.getByRole('dialog')).toHaveClass('max-h-[85dvh]')
         expect(screen.getByText('First bot')).toBeInTheDocument()
         expect(screen.getByText('Unsupported')).toBeInTheDocument()
@@ -136,11 +145,11 @@ describe('BurnModeControl', () => {
 })
 
 describe('getBurnModeSummary', () => {
-    it('does not call a partially supported fleet fully applied', () => {
+    it('reports unsupported bots as unavailable rather than needing repair', () => {
         expect(getBurnModeSummary(state({ enabled: true, sessions: [
             { sessionId: 'one', status: 'applied', detail: '', previous: null },
             { sessionId: 'two', status: 'unsupported', detail: '', previous: null },
-        ] }))).toBe('1 needs attention')
+        ] }))).toBe('1 unavailable')
     })
 
     it('does not report an unsuccessful restore as merely zero pending', () => {
