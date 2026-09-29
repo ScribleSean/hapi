@@ -123,3 +123,4 @@ describe('BurnModeService', () => {
         expect(f.service.state('a').sessions.find(row => row.sessionId === 'offline')?.previous).toEqual({ modelReasoningEffort: null, serviceTier: null })
     })
 })
+
