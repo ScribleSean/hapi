@@ -17,9 +17,9 @@ function setup() {
 describe('service tier capability preflight', () => {
     it('only enables Fast from the advertised native catalog', async () => {
         const { api, methods } = setup()
-        expect((await loadServiceTierTarget(api, summary)).unavailable).toBeUndefined()
+        expect((await loadServiceTierTarget(api, summary)).toMatchObject({ fastAvailable: true, unavailable: undefined })
         methods.getSessionCodexModels.mockResolvedValue({ success: true, models: [{ id: 'm', isDefault: true, serviceTiers: [] }] })
-        expect((await loadServiceTierTarget(api, summary)).unavailable).toContain('not advertised')
+        expect((await loadServiceTierTarget(api, summary)).toMatchObject({ fastAvailable: false, unavailable: undefined })
     })
     it('rechecks the model before a write and does not retry failures', async () => {
         const { api, session, methods } = setup()
