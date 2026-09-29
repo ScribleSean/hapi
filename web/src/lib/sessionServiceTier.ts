@@ -6,8 +6,10 @@ import { codexModelAdvertisesFastTier, getDisplayedCodexServiceTier } from '@/co
 export type ServiceTierTarget = {
     id: string
     title: string
+    flavor: string
     model: string | null
     current: 'fast' | 'standard'
+    fastAvailable: boolean
     unavailable?: string
 }
 
@@ -26,8 +28,10 @@ export async function loadServiceTierTarget(
     const target: ServiceTierTarget = {
         id: summary.id,
         title: getSessionTitle(summary),
+        flavor: summary.metadata?.flavor ?? 'claude',
         model: summary.model,
-        current: getDisplayedCodexServiceTier(summary.serviceTier)
+        current: getDisplayedCodexServiceTier(summary.serviceTier),
+        fastAvailable: false
     }
     const unavailable = (reason: string) => ({ ...target, unavailable: reason })
     if (!summary.active) return unavailable('Offline. Resume this session before changing speed.')
@@ -35,19 +39,19 @@ export async function loadServiceTierTarget(
     try {
         const { session } = await api.getSession(summary.id)
         if (!session.active) return unavailable('Session disconnected.')
-        if ((session.metadata?.flavor ?? 'claude') !== 'codex') return unavailable('Harness changed. Refresh the picker.')
+        const flavor = session.metadata?.flavor ?? 'claude'
+        if (flavor !== 'codex') return unavailable('Harness changed. Refresh the picker.')
         if (session.agentState?.controlledByUser && !session.metadata?.capabilities?.concurrentClients) {
             return unavailable('Controlled in its terminal. Switch to remote control first.')
         }
         const catalog = await api.getSessionCodexModels(summary.id)
         if (!catalog.success) throw Error(catalog.error ?? 'Model discovery failed')
-        if (!codexModelAdvertisesFastTier(session.model, catalog.models ?? [])) {
-            return unavailable('Fast is not advertised for this model and account.')
-        }
         return {
             ...target,
+            flavor,
             model: session.model,
-            current: getDisplayedCodexServiceTier(session.serviceTier)
+            current: getDisplayedCodexServiceTier(session.serviceTier),
+            fastAvailable: codexModelAdvertisesFastTier(session.model, catalog.models ?? [])
         }
     } catch (error) {
         return unavailable(error instanceof Error ? error.message : 'Could not load speed settings.')
@@ -76,6 +80,10 @@ export async function applyServiceTierTargets(
             const fresh = await loadServiceTierTarget(api, session)
             if (fresh.unavailable || fresh.model !== target.model) {
                 result('skipped', fresh.unavailable ?? 'Capabilities changed. Refresh before applying.')
+                continue
+            }
+            if (value === 'fast' && !fresh.fastAvailable) {
+                result('skipped', 'Fast is no longer advertised for this model and account.')
                 continue
             }
             if (fresh.current === value) {
