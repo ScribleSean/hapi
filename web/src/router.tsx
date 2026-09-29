@@ -51,10 +51,11 @@ import { clearDraftsAfterSend } from '@/lib/clearDraftsAfterSend'
 import { transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
 import { getDraftAttachments } from '@/lib/composer-attachment-drafts'
 import { refreshSessionDetailPreservingActive } from '@/lib/session-detail-optimistic'
-import { inactiveSessionCanResume, resolveCursorReopenGate } from '@/lib/sessionResume'
+import { inactiveSessionCanResume, resolveAgentSessionIdFromMetadata, resolveCursorReopenGate } from '@/lib/sessionResume'
 import { initializeSessionLastSeen } from '@/lib/sessionLastSeen'
 import { useSelectedSessionSeen } from '@/hooks/useSelectedSessionSeen'
 import { useSessionBrowserTitle } from '@/hooks/useSessionBrowserTitle'
+import { useSessionAutoConnect } from '@/hooks/useSessionAutoConnect'
 import { clearCodexImportedSession } from '@/lib/codexImportedSessions'
 import { getSupersedingSessionId, prepareFollowSupersedingSession, shouldFollowSupersedingSession } from '@/routes/sessions/followSupersedingSession'
 import { migrateSuppressedSendError } from '@/lib/suppressed-send-error'
@@ -354,6 +355,7 @@ function SessionPage() {
         error: cursorChatStoreError,
         isLoading: cursorChatStoreLoading,
     } = useCursorChatStoreStatus({ api, session })
+    const { machines: sessionMachines, isLoading: sessionMachinesLoading } = useMachines(api, true)
     const {
         messages,
         warning: messagesWarning,
@@ -543,11 +545,13 @@ function SessionPage() {
                 sessionId: currentSessionId,
                 url: ''
             })
-            throw new ApiError(
-                t('chat.sendError.sessionInactive'),
-                409,
-                'session_inactive',
-            )
+            throw error instanceof Error
+                ? error
+                : new ApiError(
+                    t('chat.sendError.sessionInactive'),
+                    409,
+                    'session_inactive',
+                )
         }
     }, [api, session, messages.length, cursorChatStoreStatus?.onDisk, t, addToast])
 
@@ -577,6 +581,40 @@ function SessionPage() {
             void syncTailMessages(api, resolvedSessionId).catch(() => {})
         }
     }, [api, navigate, queryClient, session])
+
+    const owningMachineId = session?.metadata?.machineId?.trim() || null
+    const owningMachineOnline = owningMachineId
+        ? sessionMachines.some((machine) => machine.id === owningMachineId && machine.active)
+        : false
+    const hasResumableNativeIdentity = Boolean(resolveAgentSessionIdFromMetadata(session?.metadata))
+    const autoConnectEligible = Boolean(
+        session
+        && Boolean(api)
+        && !session.active
+        && session.metadata?.lifecycleState !== 'archived'
+        && owningMachineOnline
+        && hasResumableNativeIdentity
+        && inactiveSessionCanResume(session, messages.length, cursorChatStoreStatus?.onDisk)
+    )
+    const autoConnectUnavailableMessage = !owningMachineId
+        ? t('session.reconnect.machineUnknown')
+        : !owningMachineOnline
+            ? t('session.reconnect.machineOffline')
+            : session?.metadata?.lifecycleState === 'archived'
+                ? t('session.reconnect.archived')
+                : !hasResumableNativeIdentity
+                    ? t('session.reconnect.identityMissing')
+                : t('session.inactive.cannotResume')
+    const { status: autoConnectStatus, retry: retryAutoConnect } = useSessionAutoConnect({
+        routeKey: sessionId,
+        sessionAvailable: Boolean(session),
+        sessionActive: Boolean(session?.active),
+        machineAvailabilityKnown: !sessionMachinesLoading,
+        eligible: autoConnectEligible,
+        unavailableMessage: autoConnectUnavailableMessage,
+        resolveSessionId,
+        onResolved: handleSessionResolved,
+    })
 
     const {
         sendMessage,
@@ -798,6 +836,8 @@ function SessionPage() {
             cursorChatOnDisk={cursorChatStoreStatus?.onDisk}
             reopenDisabledReason={cursorReopenDisabledReason}
             reopenHint={cursorReopenUnverifiedHint}
+            autoConnectStatus={autoConnectStatus}
+            onRetryAutoConnect={retryAutoConnect}
             messages={messages}
             messagesWarning={messagesWarning}
             hasMoreMessages={messagesHasMore}
