@@ -1064,6 +1064,11 @@ export function HappyComposer(props: {
             : [],
         [agentFlavor, modelReasoningEffort, availableModelReasoningEffortOptions]
     )
+    const modelReasoningValueLabel = useMemo(
+        () => codexReasoningEffortOptions.find((option) => option.value === modelReasoningEffort)?.label
+            ?? (modelReasoningEffort ? modelReasoningEffort : 'Default'),
+        [codexReasoningEffortOptions, modelReasoningEffort]
+    )
     // Pi: group models by provider for hierarchical display
     const piModelGroups = useMemo(
         () => piModels && piModels.length > 0 ? groupModelsByProvider(piModels) : null,
@@ -2243,7 +2248,7 @@ export function HappyComposer(props: {
                                     className="rounded-md border border-[var(--app-divider)] px-2 py-1 text-xs text-[var(--app-fg)] hover:bg-[var(--app-secondary-bg)] disabled:opacity-50"
                                     onClick={() => { setSettingsSection('effort'); setShowSettings(true) }}
                                 >
-                                    Reasoning: {effortValueLabel}
+                                    Reasoning: {modelReasoningValueLabel}
                                 </button>
                             ) : null}
                             {showFastModeSettings ? (

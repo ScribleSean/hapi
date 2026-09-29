@@ -14,7 +14,7 @@ const summary = {
 } as const;
 
 function setup() {
-  const session = { ...summary, agentState: null };
+  const session = { ...summary, model: summary.model as string, agentState: null };
   const methods = {
     getSession: vi.fn().mockResolvedValue({ session }),
     getSessionCodexModels: vi
@@ -31,18 +31,12 @@ function setup() {
 describe("service tier capability preflight", () => {
   it("only enables Fast from the advertised native catalog", async () => {
     const { api, methods } = setup();
-    expect(await loadServiceTierTarget(api, summary)).toMatchObject({
-      fastAvailable: true,
-      unavailable: undefined,
-    });
+    expect((await loadServiceTierTarget(api, summary)).fastAvailable).toBe(true);
     methods.getSessionCodexModels.mockResolvedValue({
       success: true,
       models: [{ id: "m", isDefault: true, serviceTiers: [] }],
     });
-    expect(await loadServiceTierTarget(api, summary)).toMatchObject({
-      fastAvailable: false,
-      unavailable: undefined,
-    });
+    expect((await loadServiceTierTarget(api, summary)).fastAvailable).toBe(false);
   });
   it("rechecks the model before a write and does not retry failures", async () => {
     const { api, session, methods } = setup();

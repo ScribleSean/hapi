@@ -23,13 +23,14 @@ export type ServiceTierResult = {
   detail: string;
 };
 
+type SessionSpeedSummary = Pick<SessionSummary, "id" | "active" | "metadata" | "model"> & {
+  serviceTier?: string | null;
+};
+
 /** Reads only the current session and its advertised Codex catalog. */
 export async function loadServiceTierTarget(
   api: ApiClient,
-  summary: Pick<
-    SessionSummary,
-    "id" | "active" | "metadata" | "model" | "serviceTier"
-  >,
+  summary: SessionSpeedSummary,
 ): Promise<ServiceTierTarget> {
   const target: ServiceTierTarget = {
     id: summary.id,
