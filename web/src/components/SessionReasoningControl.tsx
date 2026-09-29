@@ -432,9 +432,11 @@ function BotSettingsDialog({
                 const current =
                   tab === "reasoning"
                     ? reasoningLabel((target as ReasoningTarget).current)
-                    : (target as ServiceTierTarget).current === "fast"
-                      ? "Fast"
-                      : "Standard";
+                    : flavor(target) !== "codex"
+                      ? "Not exposed"
+                      : (target as ServiceTierTarget).current === "fast"
+                        ? "Fast"
+                        : "Standard";
                 const detail =
                   target.unavailable ??
                   (supports(target)

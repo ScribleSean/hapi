@@ -78,6 +78,16 @@ describe('sidebar reasoning controls', () => {
         await waitFor(() => expect(methods.setServiceTier).toHaveBeenCalledWith('a', 'fast'))
         expect(await screen.findByText(/1 applied/)).toBeTruthy()
     })
+    it('does not imply Standard is exposed for non-Codex sessions', async () => {
+        const { api } = setup()
+        wrapper(<SessionReasoningControl api={api} sessions={sessions} bulk />)
+        fireEvent.click(screen.getByRole('button', { name: 'Bot settings for 2 sessions' }))
+        await screen.findByRole('tab', { name: 'Speed' })
+        fireEvent.click(screen.getByRole('tab', { name: 'Speed' }))
+        await screen.findByRole('combobox', { name: 'Requested speed' })
+        expect(screen.getByText('codex · m · Standard')).toBeTruthy()
+        expect(screen.getByText('claude · m · Not exposed')).toBeTruthy()
+    })
 })
 describe('connections overview', () => {
     it('shows models, filters sessions, and does not claim runner connectivity verifies authentication', async () => {
