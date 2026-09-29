@@ -18,6 +18,7 @@ function supportsUltraAndFast(session: Session, catalog: Catalog): boolean {
 }
 function isBurnConfig(session: Session): boolean { return session.modelReasoningEffort?.toLowerCase() === 'ultra' && /^(fast|priority)$/i.test(session.serviceTier?.trim() ?? '') }
 function sameIdentity(before: Session, after: Session): boolean { return before.active === after.active && before.model === after.model && flavorOf(before) === flavorOf(after) && ownsRemote(before) === ownsRemote(after) }
+function fingerprint(session: Session): string { return JSON.stringify([session.active, session.model ?? null, flavorOf(session), ownsRemote(session)]) }
 
 /** Durable, hub-owned policy. It never resumes a bot or changes its model. */
 export class BurnModeService {
@@ -57,7 +58,7 @@ export class BurnModeService {
     private async reconcile(namespace: string): Promise<void> {
         const policy = this.state(namespace); const sessions = this.deps.sessions(namespace)
         for (let i = 0; i < sessions.length; i += 4) await Promise.all(sessions.slice(i, i + 4).map(session => this.reconcileSession(namespace, session, policy)))
-        const current = this.state(namespace); if (!current.enabled) this.store.burnMode.finishRestoreWhenComplete(namespace)
+        const current = this.state(namespace); if (!current.enabled) { this.store.burnMode.markMissingBaselines(namespace, new Set(sessions.map(session => session.id))); this.store.burnMode.finishRestoreWhenComplete(namespace) }
     }
     private currentPolicy(namespace: string, observed: BurnModeState): boolean { const current = this.state(namespace); return current.enabled === observed.enabled && current.revision === observed.revision }
     private async reconcileSession(namespace: string, initial: Session, policy: BurnModeState): Promise<void> {
@@ -67,6 +68,7 @@ export class BurnModeService {
         if (policy.enabled) {
             if (row?.status === 'failed' && row.attemptRevision === policy.revision) return
             if (row?.status === 'applied' && isBurnConfig(session)) return
+            if (row?.status === 'unsupported' && row.fingerprint === fingerprint(session)) return
             if (!session.active) return this.store.burnMode.ensureStatus(namespace, session.id, session.seq, 'pending', offline)
             if (flavorOf(session) !== 'codex') return this.store.burnMode.ensureStatus(namespace, session.id, session.seq, 'unsupported', 'Ultra plus Fast is only exposed for capable Codex sessions.')
             if (!ownsRemote(session)) return this.store.burnMode.ensureStatus(namespace, session.id, session.seq, 'blocked', 'Controlled in its terminal. Switch to remote control first.')
@@ -75,7 +77,7 @@ export class BurnModeService {
             const fresh = this.deps.session(session.id) ?? session
             if (!this.currentPolicy(namespace, policy) || !sameIdentity(session, fresh)) return this.schedule(namespace)
             session = fresh
-            if (!supportsUltraAndFast(session, catalog)) return this.store.burnMode.ensureStatus(namespace, session.id, session.seq, 'unsupported', 'Ultra and Fast are not both advertised for this exact model and account.')
+            if (!supportsUltraAndFast(session, catalog)) return this.store.burnMode.ensureStatus(namespace, session.id, session.seq, 'unsupported', 'Ultra and Fast are not both advertised for this exact model and account.', fingerprint(session))
             // Only a verified, live, eligible bot gets a restoration baseline.
             this.store.burnMode.captureBaseline(namespace, session.id, session.seq, session.modelReasoningEffort ?? null, session.serviceTier ?? null)
             if (isBurnConfig(session)) return this.store.burnMode.setResult(namespace, session.id, 'applied', 'Ultra reasoning and Fast tier already active.')
@@ -100,4 +102,3 @@ export class BurnModeService {
     }
     private fail(namespace: string, sessionId: string, revision: number, error: unknown, fallback: string): void { this.store.burnMode.ensureStatus(namespace, sessionId, 0, 'failed', error instanceof Error ? error.message : fallback); this.store.burnMode.setResult(namespace, sessionId, 'failed', error instanceof Error ? error.message : fallback, revision) }
 }
-
