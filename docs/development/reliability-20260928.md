@@ -21,7 +21,7 @@ This branch keeps existing shared native Codex thread identities while improving
 - A full web run with three workers passed 3,292 tests and failed 12 tests in one stale mobile fixture. That fixture was corrected to supply the runtime thread message array; its two affected suites then passed all 43 tests.
 - Windows CLI, Windows hub, macOS ARM64 CLI and production web assets built. The cross-compiled macOS binary required local ad-hoc signing before its version check succeeded.
 - A scratch hub survived an abrupt Windows process restart with an online SQLite backup, integrity check, authenticated state reads and an unchanged fixture message. Native permission settings were checked on a disposable thread without a model turn.
-- Actual deployed bot controls were inspected without applying user settings. Two previously failing large-history sessions reconnected and completed synchronization. A local-model session reconnected with its Ollama provider preserved.
+- Actual deployed bot controls and a native goal summary were inspected without applying user settings. Two previously failing large-history sessions reconnected and completed synchronization. A local-model session reconnected with its Ollama provider preserved and completed its bounded text-only test in the original HAPI/native thread.
 
 The complete test suite is not green: the Windows CLI run has 29 failures, the hub run 21, and relay one. Recorded failures concern platform/path/symlink assumptions, SQLite cleanup, process/fixture timing and voice environment fixtures. They have not all been independently reproduced on an unchanged baseline; focused passing checks are not a claim that every regression is excluded.
 
