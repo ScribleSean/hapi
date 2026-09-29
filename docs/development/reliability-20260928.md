@@ -53,4 +53,14 @@ The original stale-turn regression failed against the previous implementation. A
 
 The Windows launcher was updated while preserving existing native sessions. The repair serves mobile and desktop through the same CLI connection. Already-loaded wrappers retain their old code until a controlled reconnect. The coordinator's current connection is deliberately preserved while its turn is active; its idle-boundary adoption and original saved-message delivery must be verified separately, without replaying requests or removing queued messages.
 
-The signed Mac steering binaries are staged but activation is not accepted: launchd rejected bootstrap with error 5, including after correcting an executable-array edit. The prior shared runner and isolated local hub/runner were restored and verified healthy. Native sessions and settings were preserved. Resolve that launchd rejection before claiming the Mac launchers include this steering repair.
+The initial signed Mac steering activation was rolled back after launchd rejected bootstrap with error 5. This is historical: the later accepted launcher activation is recorded in [Burn mode and rollout evidence](burn-mode.md). Existing native wrappers were preserved and still require their own controlled adoption.
+
+## Mobile send follow-up, September 29
+
+The web client now sends the saved message and its steering intent in one existing hub POST. It consumes the hub's delivery result instead of issuing a second browser request. Backgrounding a phone between two requests can no longer strand that send before its steering request. The original message identity is retained; a saved but uncertain delivery is not automatically resent.
+
+Supported remote Codex sends and manual queued-message steering no longer depend on potentially stale mobile `thinking` or `steeringActive` flags. The hub/native runtime determines whether a turn is actually active. An ended or idle turn leaves ordinary queued delivery available without presenting a false send failure. Explicit Queue, schedules, scratchlist, local-control restrictions and Pi's main-turn check remain unchanged.
+
+Verification: 131 focused web tests, web typecheck, production build and independent static review passed. The shared Windows web deployment's HTML, main JavaScript and service worker matched the built files byte for byte through its HTTPS URL; health returned HTTP 200. Existing hub, runner and native-session processes were preserved. This web-only update does not update the independently hosted Mac-local embedded web assets.
+
+During diagnosis, one existing informational queued message was steered once using the maintained endpoint, and an iPhone test arrived in the same active native turn. The user confirmed it worked; the subsequent native queue read was empty. This is session-specific acceptance, not proof that every loaded wrapper has adopted the earlier native steering repair. The prepared restart helper was not executed and is marked not ready. Installed web apps may need the existing update banner's Reload action to load the new assets.
