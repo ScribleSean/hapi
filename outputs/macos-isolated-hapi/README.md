@@ -1,36 +1,29 @@
-# Isolated macOS local HAPI example
+# Mac-local HAPI fallback
 
-This is a prepared, inactive example for a **new Mac-only HAPI instance**. It
-does not alter the Mac's existing `~/.hapi`, existing runner, Windows-hub URL,
-credentials, SQLite database, or native stores.
+`install-launchd.sh` installs a separate Mac-local hub and runner without
+altering the Windows-connected `~/.hapi` or `com.hapi.runner`. It uses
+`~/.hapi-mac-local`, binds the hub to `http://127.0.0.1:3016`, runs with
+`--no-relay`, and owns only `com.hapi.mac-local-hub` and
+`com.hapi.mac-local-runner`.
 
-The default home is `~/.hapi-mac-local`; the default hub address is
-`http://127.0.0.1:3016`. The hub deliberately has no `--relay` argument and
-binds only to loopback. A private Tailscale endpoint, if wanted later, needs a
-separate explicit exposure decision. This example does not configure one.
+The defaults require the versioned executable at
+`~/.local/share/hapi-runner-releases/20260928/hapi-custom`, the workspace
+`~/Developer`, and matching UI assets at
+`~/.local/share/hapi-mac-local-web/20260928/web/dist`. Override the last path
+with `HAPI_LOCAL_WEB_ROOT` when needed. The installer rejects `~/.hapi`,
+paths inside it, invalid or conflicting ports, a home-wide workspace, missing
+assets, and a non-executable binary.
 
-Set `HAPI_WORKSPACE_ROOT` to one specific existing Mac development directory.
-The script refuses `$HOME` as a workspace root. It reads only
-`HAPI_LOCAL_HOME`, never ambient `HAPI_HOME`, and rejects `~/.hapi`, all paths
-inside it, and symlink aliases resolving there. `HAPI_LOCAL_PORT` defaults to
-`3016` and must differ from `HAPI_PRIMARY_PORT` (default `3006`).
+Run without arguments for a no-write preview, then use `--install`. The local
+home and logs are mode `0700`; settings and log files are mode `0600`. The hub
+creates its own local token before its runner starts. No live token, store, or
+native identity is copied.
 
-Run the script without arguments to review the exact intended launchd
-configuration. It performs no writes and starts nothing. `--install` is the
-only mode that writes the two LaunchAgents and bootstraps them.
+`~/.local/bin/hapi-local` has idempotent `status`, `start`, and `stop`
+commands. `login` is explicit: it copies only the local token to the Mac
+clipboard and prints the local URL. `verify-local.sh` performs read-only hub,
+local-runner, local-auth, store-isolation, and UI HTTP checks without printing
+the token.
 
-```bash
-./install-launchd.sh
-./install-launchd.sh --install
-```
-
-`HAPI_LOCAL_HOME`, `HAPI_LOCAL_PORT`, and `HAPI_BIN` may be overridden only at
-the future manual activation point. Both services receive the same isolated home,
-so the runner uses the new local hub's generated configuration. No credentials
-are copied from the live Mac runner.
-
-This cannot resume or take over a Windows-owned HAPI/Codex session. Cold resume
-requires the runner to have the same native `CODEX_HOME` and credentials as the
-recorded session; the existing Mac identity remains attached to the Windows hub
-until an operator intentionally changes it. Keep the old and new hubs separate
-in the client hub selector.
+This local identity cannot resume Windows-owned HAPI/Codex sessions. Keep the
+two hub URLs separate in the client hub selector.
