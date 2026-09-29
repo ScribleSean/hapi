@@ -7,7 +7,7 @@ import { getSessionTitle } from '@/lib/sessionTitle'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
 const STATUS_LABELS: Record<BurnSessionStatus, string> = {
-    pending: 'Pending', applied: 'Applied', restored: 'Restored', unsupported: 'Unsupported', blocked: 'Blocked', failed: 'Failed',
+    pending: 'Pending', applied: 'Applied', restored: 'Restored', unsupported: 'No controls', blocked: 'Blocked', failed: 'Failed',
 }
 
 function countStatus(state: BurnModeState, status: BurnSessionStatus): number {
@@ -25,16 +25,23 @@ export function getBurnModeSummary(state: BurnModeState | undefined): string {
     }
     if (!state.enabled) return 'Off'
     const pending = countStatus(state, 'pending')
-    if (blockedOrFailed) return `${blockedOrFailed} needs attention${unsupported ? `, ${unsupported} unavailable` : ''}`
-    if (pending) return `${pending} pending${unsupported ? `, ${unsupported} unavailable` : ''}`
-    if (unsupported) return `${unsupported} unavailable`
+    if (blockedOrFailed) return `${blockedOrFailed} needs attention${unsupported ? `, ${unsupported} no controls` : ''}`
+    if (pending) return `${pending} pending${unsupported ? `, ${unsupported} no controls` : ''}`
+    if (unsupported) return `${unsupported} no controls`
     return `${countStatus(state, 'applied')} applied`
 }
 
 function defaultValue(value: string | null): string { return value ?? 'Default' }
 
-function FlameIcon() {
-    return <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5 motion-safe:animate-pulse motion-reduce:animate-none" aria-hidden="true">
+function savedSettings(previous: BurnModeState['sessions'][number]['previous']): string | null {
+    if (!previous) return null
+    const withEffort = previous as typeof previous & { effort?: string | null }
+    if (Object.prototype.hasOwnProperty.call(withEffort, 'effort')) return `Saved: effort ${defaultValue(withEffort.effort ?? null)}`
+    return `Saved: reasoning ${defaultValue(previous.modelReasoningEffort)} · tier ${defaultValue(previous.serviceTier)}`
+}
+
+function FlameIcon({ animated = false }: { animated?: boolean }) {
+    return <svg viewBox="0 0 24 24" fill="none" className={`h-5 w-5 ${animated ? 'motion-safe:animate-pulse motion-reduce:animate-none' : ''}`} aria-hidden="true">
         <path d="M13.7 2.8c.4 3-1.7 4.2-2.2 6.2-.4-1-1.4-1.9-2.8-2.7.1 3.1-3.3 4.8-3.3 8.3 0 4.1 2.9 6.6 6.6 6.6 3.8 0 6.6-2.7 6.6-6.7 0-4-2.9-6.5-4.9-11.7Z" fill="currentColor" opacity=".95" />
         <path d="M12.3 10.5c.1 2-1.7 2.9-1.7 5 0 1.6.8 2.6 2 2.6 1.3 0 2.2-1 2.2-2.7 0-1.5-1-2.8-2.5-4.9Z" fill="white" opacity=".7" />
     </svg>
@@ -51,9 +58,9 @@ export function BurnModeControl(props: { api: ApiClient | null; sessions: Sessio
     const statusSummary = burn.readError ? 'Unavailable (stale)' : getBurnModeSummary(state)
 
     return <>
-        <div className={`flex min-h-11 items-center gap-1 rounded-lg px-1 text-xs transition-colors ${state?.enabled ? 'bg-orange-500/10 text-orange-700 shadow-[0_0_20px_rgba(249,115,22,0.18)] dark:text-orange-300' : 'text-[var(--app-link)]'}`}>
-            <span className={`flex min-h-11 items-center gap-1.5 pl-2 font-semibold ${state?.enabled ? 'text-orange-700 dark:text-orange-200' : 'text-[var(--app-fg)]'}`}>
-                <span className={`flex h-7 w-7 items-center justify-center rounded-full transition-colors ${state?.enabled ? 'bg-gradient-to-br from-amber-300 via-orange-500 to-red-500 text-white shadow-[0_0_14px_rgba(249,115,22,0.7)]' : 'bg-[var(--app-secondary-bg)] text-[var(--app-hint)]'}`}><FlameIcon /></span>
+        <div className={`flex min-h-11 items-center gap-1 rounded-lg px-1 text-xs transition-colors ${state?.enabled ? 'bg-orange-500/10 text-orange-700 shadow-[0_0_20px_rgba(249,115,22,0.18)]' : 'text-[var(--app-link)]'}`}>
+            <span className={`flex min-h-11 items-center gap-1.5 pl-2 font-semibold ${state?.enabled ? 'text-orange-700' : 'text-[var(--app-fg)]'}`}>
+                <span className={`flex h-7 w-7 items-center justify-center rounded-full transition-colors ${state?.enabled ? 'bg-gradient-to-br from-amber-300 via-orange-500 to-red-500 text-white shadow-[0_0_14px_rgba(249,115,22,0.7)]' : 'bg-[var(--app-secondary-bg)] text-[var(--app-hint)]'}`}><FlameIcon animated={Boolean(state?.enabled)} /></span>
                 Burn
             </span>
             <button type="button" role="switch" aria-checked={Boolean(state?.enabled)} aria-label={switchLabel} title={switchLabel}
@@ -63,7 +70,7 @@ export function BurnModeControl(props: { api: ApiClient | null; sessions: Sessio
                 <span aria-hidden="true" className={`absolute h-6 w-11 rounded-full transition-colors ${state?.enabled ? 'bg-gradient-to-r from-amber-400 via-orange-500 to-red-500 shadow-[0_0_12px_rgba(249,115,22,0.65)]' : 'bg-[var(--app-divider)]'}`} />
                 <span aria-hidden="true" className={`absolute left-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-white shadow transition-transform ${state?.enabled ? 'translate-x-5 text-orange-500' : ''}`}>{state?.enabled ? <FlameIcon /> : null}</span>
             </button>
-            <button type="button" className="min-h-11 min-w-0 rounded-md px-2 text-left text-xs text-[var(--app-link)] hover:bg-[var(--app-secondary-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
+            <button type="button" className={`min-h-11 min-w-0 rounded-md px-2 text-left text-xs hover:bg-[var(--app-secondary-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${state?.enabled ? 'text-orange-700' : 'text-[var(--app-link)]'}`}
                 aria-label={`Burn status: ${statusSummary}. View details`} onClick={() => setDetailsOpen(true)}>
                 {burn.isLoading ? 'Loading…' : statusSummary}
             </button>
@@ -84,7 +91,7 @@ export function BurnModeControl(props: { api: ApiClient | null; sessions: Sessio
                         {state.sessions.map((session) => <li key={session.sessionId} className="rounded border border-[var(--app-divider)] p-2 text-sm">
                             <div className="flex items-start justify-between gap-3"><span className="font-medium break-words">{sessionNames.get(session.sessionId) ?? 'Unavailable session'}</span><span className="shrink-0 text-xs text-[var(--app-hint)]">{STATUS_LABELS[session.status]}</span></div>
                             <p className="mt-1 text-xs text-[var(--app-hint)]">{session.detail}</p>
-                            {session.previous ? <p className="mt-1 text-xs text-[var(--app-hint)]">Saved: reasoning {defaultValue(session.previous.modelReasoningEffort)} · tier {defaultValue(session.previous.serviceTier)}</p> : null}
+                            {savedSettings(session.previous) ? <p className="mt-1 text-xs text-[var(--app-hint)]">{savedSettings(session.previous)}</p> : null}
                         </li>)}
                     </ul>
                 </div> : null}
