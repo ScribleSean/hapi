@@ -19,13 +19,14 @@ function fixture(items = [session('one', 'a')]) {
     const apply = mock(async (id: string, config: { modelReasoningEffort: string | null, serviceTier: string | null }) => {
         const target = items.find(item => item.id === id)!; target.modelReasoningEffort = config.modelReasoningEffort; target.serviceTier = config.serviceTier
     })
+    const catalog = mock(async () => ({ success: true, models: [{ id: 'm', isDefault: true, supportedReasoningEfforts: ['ultra'], serviceTiers: ['priority'] }] }))
     const service = new BurnModeService(store, {
         sessions: namespace => items.filter(item => item.namespace === namespace),
         session: id => items.find(item => item.id === id),
-        catalog: async () => ({ success: true, models: [{ id: 'm', isDefault: true, supportedReasoningEfforts: ['ultra'], serviceTiers: ['priority'] }] }),
+        catalog,
         apply
     })
-    return { store, items, apply, service }
+    return { store, items, apply, catalog, service }
 }
 
 describe('BurnModeService', () => {
@@ -102,4 +103,23 @@ describe('BurnModeService', () => {
         expect(f.apply.mock.calls.length).toBe(restoredCalls)
     })
 
+    it('does not repeatedly read an unchanged unsupported catalog', async () => {
+        const target = session('bad', 'a'); target.model = 'other'
+        const f = fixture([target]); f.service.set('a', true, 0); await f.service.flush('a')
+        expect(f.catalog).toHaveBeenCalledTimes(1)
+        f.service.schedule('a'); await f.service.flush('a')
+        expect(f.catalog).toHaveBeenCalledTimes(1)
+    })
+
+    it('takes a fresh baseline after a completed restore and preserves unfinished peers', async () => {
+        const done = session('done', 'a'); const offline = session('offline', 'a'); const f = fixture([done, offline])
+        f.service.set('a', true, 0); await f.service.flush('a')
+        offline.active = false
+        f.service.set('a', false, 1); await f.service.flush('a')
+        expect(f.service.state('a').restoring).toBe(true)
+        done.modelReasoningEffort = 'medium'; done.serviceTier = 'standard'
+        f.service.set('a', true, 2); await f.service.flush('a')
+        expect(f.service.state('a').sessions.find(row => row.sessionId === 'done')?.previous).toEqual({ modelReasoningEffort: 'medium', serviceTier: 'standard' })
+        expect(f.service.state('a').sessions.find(row => row.sessionId === 'offline')?.previous).toEqual({ modelReasoningEffort: null, serviceTier: null })
+    })
 })
