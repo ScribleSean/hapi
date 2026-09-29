@@ -150,11 +150,11 @@ describe('HappyComposer generic model/effort value buttons', () => {
             onServiceTierChange: speed,
         })
         fireEvent.click(screen.getByRole('button', { name: mobile ? 'Settings' : 'GPT-6-Astra' }))
-        fireEvent.click(screen.getByRole('button', { name: 'Effort & speed' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Reasoning' }))
         fireEvent.click(screen.getByRole('button', { name: 'Ultra' }))
         expect(reasoning).toHaveBeenCalledWith('ultra')
         fireEvent.click(screen.getByRole('button', { name: 'Settings' }))
-        fireEvent.click(screen.getByRole('button', { name: 'Effort & speed' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Speed' }))
         fireEvent.click(screen.getByRole('button', { name: 'Fast' }))
         expect(speed).toHaveBeenCalledWith('fast')
     })
@@ -162,9 +162,22 @@ describe('HappyComposer generic model/effort value buttons', () => {
     it('lets a Claude model-only picker navigate to its effort controls', () => {
         renderComposer('claude')
         fireEvent.click(screen.getByRole('button', { name: 'Sonnet 4' }))
-        fireEvent.click(screen.getByRole('button', { name: 'Effort & speed' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Reasoning' }))
         expect(screen.getByText('Effort')).toBeTruthy()
         expect(screen.queryByText('Fast Mode')).toBeNull()
+    })
+
+    it('keeps native reasoning and speed reachable as visible composer controls', () => {
+        renderComposer('codex', {
+            model: 'gpt-6-astra',
+            availableModelReasoningEffortOptions: [{ value: 'high' }],
+            onModelReasoningEffortChange: vi.fn(),
+            onServiceTierChange: vi.fn(),
+        })
+        fireEvent.click(screen.getByRole('button', { name: 'Reasoning: Default' }))
+        expect(screen.getByText('Reasoning')).toBeTruthy()
+        fireEvent.click(screen.getByRole('button', { name: 'Speed: Standard' }))
+        expect(screen.getByText('Fast Mode')).toBeTruthy()
     })
 
     afterEach(() => {

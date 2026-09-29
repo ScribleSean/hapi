@@ -555,7 +555,7 @@ export function HappyComposer(props: {
     const [showSettings, setShowSettings] = useState(false)
     // Anchored settings sheet: the model/effort value buttons open only their
     // own section; the gear (null) opens the full sheet.
-    const [settingsSection, setSettingsSection] = useState<'model' | 'effort' | null>(null)
+    const [settingsSection, setSettingsSection] = useState<'model' | 'effort' | 'speed' | null>(null)
     const [isAborting, setIsAborting] = useState(false)
     const [isSwitching, setIsSwitching] = useState(false)
     const [showContinueHint, setShowContinueHint] = useState(false)
@@ -1433,10 +1433,10 @@ export function HappyComposer(props: {
     }, [api, pendingSchedule])
 
     // Opens (or closes) the settings sheet. `section` anchors the sheet to a
-    // single section ('model' / 'effort'); the gear passes nothing = full sheet.
+    // single section ('model' / 'effort' / 'speed'); the gear passes nothing = full sheet.
     // Re-clicking with a different anchor while open switches the anchor
     // instead of closing, so model->effort moves between sections directly.
-    const handleSettingsToggle = useCallback((section: 'model' | 'effort' | null = null) => {
+    const handleSettingsToggle = useCallback((section: 'model' | 'effort' | 'speed' | null = null) => {
         haptic('light')
         if (showSettings && section !== settingsSection) {
             // Open with a different anchor: switch sections, keep the sheet up.
@@ -1728,15 +1728,15 @@ export function HappyComposer(props: {
         // Unified settings sheet for every flavor (Pi included).
         // Anchored open (settingsSection): a model/effort value button expands
         // only its own area; the gear (null) expands the full sheet.
-        const sheetModelAreaOn = settingsSection !== 'effort'
-        const sheetEffortAreaOn = settingsSection !== 'model'
+        const sheetModelAreaOn = settingsSection !== 'effort' && settingsSection !== 'speed'
+        const sheetEffortAreaOn = settingsSection !== 'model' && settingsSection !== 'speed'
         const sheetOthersOn = settingsSection === null
         const sheetModelSettings = showModelSettings && sheetModelAreaOn
         const sheetModelEffortSettings = showModelEffortSettings && sheetModelAreaOn
         const sheetModelReasoningEffortSettings = showModelReasoningEffortSettings && sheetEffortAreaOn
         const sheetEffortSettings = showEffortSettings && sheetEffortAreaOn
         const sheetPermissionSettings = showPermissionSettings && sheetOthersOn
-        const sheetFastModeSettings = showFastModeSettings && sheetEffortAreaOn
+        const sheetFastModeSettings = showFastModeSettings && settingsSection !== 'model' && settingsSection !== 'effort'
         const sheetCollaborationSettings = showCollaborationSettings && sheetOthersOn
         const sheetCopilotAgentModeSettings = showCopilotAgentModeSettings && sheetOthersOn
         const sheetModelAreaSettings = sheetModelSettings || sheetModelEffortSettings || sheetModelReasoningEffortSettings || sheetEffortSettings
@@ -1748,8 +1748,11 @@ export function HappyComposer(props: {
                         {showModelSettings || showModelEffortSettings ? (
                             <button type="button" aria-pressed={settingsSection === 'model'} className="rounded px-3 py-2 text-xs aria-pressed:bg-[var(--app-secondary-bg)]" onClick={() => setSettingsSection('model')}>Models</button>
                         ) : null}
-                        {showModelReasoningEffortSettings || showEffortSettings || showFastModeSettings ? (
-                            <button type="button" aria-pressed={settingsSection === 'effort'} className="rounded px-3 py-2 text-xs aria-pressed:bg-[var(--app-secondary-bg)]" onClick={() => setSettingsSection('effort')}>Effort &amp; speed</button>
+                        {showModelReasoningEffortSettings || showEffortSettings ? (
+                            <button type="button" aria-pressed={settingsSection === 'effort'} className="rounded px-3 py-2 text-xs aria-pressed:bg-[var(--app-secondary-bg)]" onClick={() => setSettingsSection('effort')}>Reasoning</button>
+                        ) : null}
+                        {showFastModeSettings ? (
+                            <button type="button" aria-pressed={settingsSection === 'speed'} className="rounded px-3 py-2 text-xs aria-pressed:bg-[var(--app-secondary-bg)]" onClick={() => setSettingsSection('speed')}>Speed</button>
                         ) : null}
                         <button type="button" aria-pressed={settingsSection === null} className="rounded px-3 py-2 text-xs aria-pressed:bg-[var(--app-secondary-bg)]" onClick={() => setSettingsSection(null)}>All settings</button>
                     </div>
@@ -2230,6 +2233,31 @@ export function HappyComposer(props: {
                         agentFlavor={agentFlavor}
                         voiceStatus={effectiveVoiceStatus}
                     />
+
+                    {(showModelReasoningEffortSettings || showFastModeSettings) ? (
+                        <div className="mb-2 flex flex-wrap gap-2 px-1" aria-label="Session model controls">
+                            {showModelReasoningEffortSettings ? (
+                                <button
+                                    type="button"
+                                    disabled={modelEffortControlsDisabled}
+                                    className="rounded-md border border-[var(--app-divider)] px-2 py-1 text-xs text-[var(--app-fg)] hover:bg-[var(--app-secondary-bg)] disabled:opacity-50"
+                                    onClick={() => { setSettingsSection('effort'); setShowSettings(true) }}
+                                >
+                                    Reasoning: {effortValueLabel}
+                                </button>
+                            ) : null}
+                            {showFastModeSettings ? (
+                                <button
+                                    type="button"
+                                    disabled={modelEffortControlsDisabled}
+                                    className="rounded-md border border-[var(--app-divider)] px-2 py-1 text-xs text-[var(--app-fg)] hover:bg-[var(--app-secondary-bg)] disabled:opacity-50"
+                                    onClick={() => { setSettingsSection('speed'); setShowSettings(true) }}
+                                >
+                                    Speed: {displayedServiceTier === 'fast' ? t('misc.fastModeFast') : t('misc.fastModeStandard')}
+                                </button>
+                            ) : null}
+                        </div>
+                    ) : null}
 
                     {dictationActive && dictation.partialTranscript ? (
                         <div
