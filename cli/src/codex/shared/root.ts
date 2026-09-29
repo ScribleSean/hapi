@@ -532,9 +532,19 @@ export class SharedCodexRoot {
         });
         rpc.registerHandler(RPC_METHODS.SteerQueuedMessage, async raw => {
             const { localId } = z.object({ localId: z.string().min(1) }).parse(raw);
-            const expectedTurnId = this.currentTurn;
-            if (!expectedTurnId) return { steered: false, error: 'No active turn' };
-            return this.queue.steer(localId, expectedTurnId);
+            const unavailable = () => ({ steered: false, error: 'Codex is disconnected or stopping. Reconnect before steering.' });
+            const work = this.work.catch(() => {}).then(async () => {
+                if (this.closed || this.stopping || this.reconnecting || !this.client.isInitialized()) return unavailable();
+                const revision = this.turnRevision;
+                const head = await readHistoryHead(this.client, this.threadId);
+                this.applyHistoryHead(head, revision);
+                if (this.closed || this.stopping || this.reconnecting || !this.client.isInitialized()) return unavailable();
+                const expectedTurnId = this.currentTurn;
+                if (!expectedTurnId) return { steered: false, error: 'No active turn' };
+                return this.queue.steer(localId, expectedTurnId);
+            });
+            this.work = work;
+            return work;
         });
         rpc.registerHandler(RPC_METHODS.ClearConversation, async () => {
             const child = await this.newConversation(); return { sessionId: child.session.sessionId };
