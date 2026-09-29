@@ -73,6 +73,7 @@ function createApp(session: Session, opts?: {
     updateSessionSummary?: SyncEngine['updateSessionSummary']
     setSessionPinned?: (sessionId: string, pinned: boolean) => void
     setSessionPinMode?: (sessionId: string, mode: 'none' | 'project' | 'global') => void
+    isBurnControlled?: SyncEngine['isBurnControlled']
 }) {
     const applySessionConfigCalls: Array<[string, Record<string, unknown>]> = []
     const applySessionConfig = async (sessionId: string, config: Record<string, unknown>) => {
@@ -142,6 +143,7 @@ function createApp(session: Session, opts?: {
             ? { ok: true, sessionId: session.id, session }
             : { ok: false, reason: 'not-found' },
         applySessionConfig,
+        isBurnControlled: opts?.isBurnControlled ?? (() => false),
         listCursorModelsForSession,
         listCodexModelsForSession: opts?.listCodexModelsForSession ?? (async () => ({
             success: true,
@@ -666,6 +668,27 @@ describe('sessions routes', () => {
         expect(applySessionConfigCalls).toEqual([
             ['session-1', { modelReasoningEffort: 'high' }]
         ])
+    })
+
+    it('does not allow manual Codex reasoning or speed changes while Burn controls the session', async () => {
+        const isBurnControlled: SyncEngine['isBurnControlled'] = (sessionId, namespace) => {
+            expect([sessionId, namespace]).toEqual(['session-1', 'default'])
+            return true
+        }
+        const { app, applySessionConfigCalls } = createApp(createSession(), { isBurnControlled })
+        for (const [path, body] of [
+            ['/api/sessions/session-1/model-reasoning-effort', { modelReasoningEffort: 'high' }],
+            ['/api/sessions/session-1/service-tier', { serviceTier: 'fast' }],
+        ]) {
+            const response = await app.request(path, {
+                method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body)
+            })
+            expect(response.status).toBe(409)
+            expect(await response.json()).toEqual({
+                error: 'Burn mode controls Codex reasoning and speed for this session. Disable Burn mode first.'
+            })
+        }
+        expect(applySessionConfigCalls).toEqual([])
     })
 
     it('applies fast service tier changes for remote Codex sessions', async () => {
