@@ -4,6 +4,8 @@ export const BurnSessionStatusSchema = z.enum(['pending', 'applied', 'restored',
 export const BurnPreviousSettingsSchema = z.object({
     modelReasoningEffort: z.string().nullable(),
     serviceTier: z.string().nullable(),
+    /** Present for generic effort harnesses; absent on persisted Codex-only rows. */
+    effort: z.string().nullable().optional(),
 })
 export const BurnSessionStateSchema = z.object({
     sessionId: z.string(),

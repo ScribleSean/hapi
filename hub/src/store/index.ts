@@ -148,6 +148,8 @@ export class Store {
                 previous_reasoning TEXT NULL, previous_tier TEXT NULL, status TEXT NOT NULL,
                 detail TEXT NOT NULL, has_baseline INTEGER NOT NULL DEFAULT 0,
                 attempt_revision INTEGER NOT NULL DEFAULT 0, fingerprint TEXT NULL,
+                previous_effort TEXT NULL, apply_reasoning INTEGER NOT NULL DEFAULT 1,
+                apply_tier INTEGER NOT NULL DEFAULT 1, apply_effort INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY(namespace, session_id)
             );
         `)
@@ -155,6 +157,12 @@ export class Store {
         if (!columns.some(column => column.name === 'has_baseline')) this.db.exec('ALTER TABLE burn_mode_session ADD COLUMN has_baseline INTEGER NOT NULL DEFAULT 0')
         if (!columns.some(column => column.name === 'attempt_revision')) this.db.exec('ALTER TABLE burn_mode_session ADD COLUMN attempt_revision INTEGER NOT NULL DEFAULT 0')
         if (!columns.some(column => column.name === 'fingerprint')) this.db.exec('ALTER TABLE burn_mode_session ADD COLUMN fingerprint TEXT NULL')
+        // Existing rows came from Codex-only Burn, which always changed both
+        // fields. Preserve that restoration contract while adding generic effort.
+        if (!columns.some(column => column.name === 'previous_effort')) this.db.exec('ALTER TABLE burn_mode_session ADD COLUMN previous_effort TEXT NULL')
+        if (!columns.some(column => column.name === 'apply_reasoning')) this.db.exec('ALTER TABLE burn_mode_session ADD COLUMN apply_reasoning INTEGER NOT NULL DEFAULT 1')
+        if (!columns.some(column => column.name === 'apply_tier')) this.db.exec('ALTER TABLE burn_mode_session ADD COLUMN apply_tier INTEGER NOT NULL DEFAULT 1')
+        if (!columns.some(column => column.name === 'apply_effort')) this.db.exec('ALTER TABLE burn_mode_session ADD COLUMN apply_effort INTEGER NOT NULL DEFAULT 0')
     }
 
     /**

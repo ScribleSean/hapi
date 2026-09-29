@@ -691,6 +691,17 @@ describe('sessions routes', () => {
         expect(applySessionConfigCalls).toEqual([])
     })
 
+    it('does not allow manual Claude effort changes while Burn controls the session', async () => {
+        const claude = createSession({ metadata: { path: '/tmp/project', host: 'localhost', flavor: 'claude' } })
+        const { app, applySessionConfigCalls } = createApp(claude, { isBurnControlled: () => true })
+        const response = await app.request('/api/sessions/session-1/effort', {
+            method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ effort: 'high' })
+        })
+        expect(response.status).toBe(409)
+        expect(await response.json()).toEqual({ error: 'Burn mode controls reasoning for this session. Disable Burn mode first.' })
+        expect(applySessionConfigCalls).toEqual([])
+    })
+
     it('applies fast service tier changes for remote Codex sessions', async () => {
         const { app, applySessionConfigCalls } = createApp(createSession())
 

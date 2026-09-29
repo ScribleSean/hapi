@@ -64,7 +64,7 @@ import {
 } from './rpcGateway'
 import { SessionCache } from './sessionCache'
 import { ingestNotifySummaryFromMessage } from './workGraphNotifyIngest'
-import { BurnModeService } from './burnMode'
+import { BurnModeService, claudeBurnCatalog, codexBurnCatalog, grokBurnCatalog, piBurnCatalog } from './burnMode'
 import type { BurnModeState } from '@hapi/protocol/burnMode'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 
@@ -244,12 +244,28 @@ export class SyncEngine {
         this.burnMode = new BurnModeService(store, {
             sessions: namespace => this.sessionCache.getSessionsByNamespace(namespace),
             session: sessionId => this.sessionCache.getSession(sessionId),
-            catalog: sessionId => this.listCodexModelsForSession(sessionId),
+            catalog: async session => {
+                switch (session.metadata?.flavor) {
+                    case 'codex': return codexBurnCatalog(session, await this.listCodexModelsForSession(session.id))
+                    case 'pi': return piBurnCatalog(session, await this.callPiRpc(session.id, RPC_METHODS.ListPiModels, {}, 120_000) as RpcListPiModelsResponse)
+                    case 'grok': return grokBurnCatalog(await this.listGrokReasoningEffortOptionsForSession(session.id))
+                    case 'claude': return claudeBurnCatalog()
+                    // These harnesses either expose no live reasoning catalog or
+                    // reject a reasoning config. Do not infer a setting from a
+                    // model name or change the model to obtain one.
+                    default: return { unavailable: `No live reasoning or speed control is supported for ${session.metadata?.flavor ?? 'this'} session.` }
+                }
+            },
             apply: (sessionId, config) => this.applySessionConfig(sessionId, config),
-            ready: (sessionId) => {
-                const listSocket = rpcRegistry.getSocketIdForMethod(`${sessionId}:${RPC_METHODS.ListCodexModels}`)
-                const configSocket = rpcRegistry.getSocketIdForMethod(`${sessionId}:${RPC_METHODS.SetSessionConfig}`)
+            ready: session => {
+                const method = session.metadata?.flavor === 'codex' ? RPC_METHODS.ListCodexModels
+                    : session.metadata?.flavor === 'pi' ? RPC_METHODS.ListPiModels
+                        : session.metadata?.flavor === 'grok' ? RPC_METHODS.ListGrokReasoningEffortOptions
+                            : null
+                const configSocket = rpcRegistry.getSocketIdForMethod(`${session.id}:${RPC_METHODS.SetSessionConfig}`)
                 const sockets = this.io.of('/cli').sockets
+                if (!method) return session.metadata?.flavor !== 'claude' || Boolean(configSocket && sockets.has(configSocket))
+                const listSocket = rpcRegistry.getSocketIdForMethod(`${session.id}:${method}`)
                 return Boolean(listSocket && configSocket && sockets.has(listSocket) && sockets.has(configSocket))
             }
         })

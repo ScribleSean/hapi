@@ -780,6 +780,9 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
 
         const flavor = sessionResult.session.metadata?.flavor ?? 'claude'
+        if (engine.isBurnControlled(sessionResult.sessionId, c.get('namespace'))) {
+            return c.json({ error: 'Burn mode controls reasoning for this session. Disable Burn mode first.' }, 409)
+        }
         if (!supportsEffort(flavor)) {
             return c.json({ error: 'Effort selection is not supported for this session type' }, 400)
         }
