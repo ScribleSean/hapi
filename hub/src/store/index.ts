@@ -13,6 +13,7 @@ import { SessionStore } from './sessionStore'
 import { UserStore } from './userStore'
 import { UsageStore } from './usageStore'
 import { WorkGraphStore } from './workGraphStore'
+import { BurnModeStore } from './burnModeStore'
 
 export type {
     NativeDevicePlatform,
@@ -36,6 +37,7 @@ export { SessionStore } from './sessionStore'
 export { UserStore } from './userStore'
 export { UsageStore } from './usageStore'
 export { WorkGraphStore } from './workGraphStore'
+export { BurnModeStore } from './burnModeStore'
 export {
     WorkGraphNotFoundError,
     WorkGraphPrincipalError,
@@ -72,6 +74,7 @@ export class Store {
     readonly scratchlist: ScratchlistStore
     readonly usage: UsageStore
     readonly workGraph: WorkGraphStore
+    readonly burnMode: BurnModeStore
 
     /**
      * Filesystem path of the underlying SQLite database, or ':memory:' for
@@ -129,6 +132,23 @@ export class Store {
         this.scratchlist = new ScratchlistStore(this.db)
         this.usage = new UsageStore(this.db)
         this.workGraph = new WorkGraphStore(this.db)
+        this.ensureBurnModeTables()
+        this.burnMode = new BurnModeStore(this.db)
+    }
+
+    /** Optional additive policy tables: old v26 hubs safely ignore them. */
+    private ensureBurnModeTables(): void {
+        this.db.exec(`
+            CREATE TABLE IF NOT EXISTS burn_mode (
+                namespace TEXT PRIMARY KEY, enabled INTEGER NOT NULL, revision INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL, restoring INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS burn_mode_session (
+                namespace TEXT NOT NULL, session_id TEXT NOT NULL, generation INTEGER NOT NULL,
+                previous_reasoning TEXT NULL, previous_tier TEXT NULL, status TEXT NOT NULL,
+                detail TEXT NOT NULL, PRIMARY KEY(namespace, session_id)
+            );
+        `)
     }
 
     /**
