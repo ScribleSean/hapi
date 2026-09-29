@@ -11,6 +11,7 @@ import {
     opencodeEffortOptionsInvalidationKey,
     resolvePiContextWindow,
     resolveLatestCompletedBoundaryIdForView,
+    canSteerSessionSend,
     shouldAutoClearPendingSchedule,
     shouldClearReasoningEffortForModelChange,
     shouldRouteToScratchlist,
@@ -19,6 +20,25 @@ import {
 import { ApiError } from '@/api/client'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import type { AttachmentMetadata, DecryptedMessage } from '@/types/api'
+
+describe('canSteerSessionSend', () => {
+    const codex = { flavor: 'codex' } as const
+
+    it('routes supported remote Codex through the hub when SSE activity flags are stale', () => {
+        expect(canSteerSessionSend({
+            agentFlavor: 'codex', metadata: codex, thinking: true,
+            steeringActive: false, controlledByUser: false,
+        })).toBe(true)
+        expect(canSteerSessionSend({
+            agentFlavor: 'codex', metadata: codex, thinking: false,
+            steeringActive: false, controlledByUser: false,
+        })).toBe(true)
+    })
+
+    it('keeps local-control Codex sends on the queue path', () => {
+        expect(canSteerSessionSend({ agentFlavor: 'codex', metadata: codex, thinking: true, steeringActive: false, controlledByUser: true })).toBe(false)
+    })
+})
 
 describe('isRewindForkFallbackError', () => {
     it('recognizes the structured safe-Fork boundary code', () => {

@@ -384,6 +384,20 @@ export function shouldRouteToScratchlist(
     return (attachments ?? []).every((att) => isHubScratchlistAttachmentPath(att.path))
 }
 
+/** Hub validates the live turn; Codex should not be held by stale SSE flags. */
+export function canSteerSessionSend(args: {
+    agentFlavor: string | null
+    metadata: Parameters<typeof isSteeringSupportedForSession>[0]
+    thinking: boolean
+    steeringActive: boolean
+    controlledByUser: boolean
+}): boolean {
+    if (!isSteeringSupportedForSession(args.metadata) || args.controlledByUser) return false
+    if (args.agentFlavor === 'codex') return true
+    if (args.agentFlavor === 'pi') return args.thinking
+    return args.steeringActive
+}
+
 export function mergeStagedAttachmentsInOrder(
     attachments: readonly AttachmentMetadata[],
     staged: readonly AttachmentMetadata[],
@@ -1797,16 +1811,19 @@ function SessionChatInner(props: SessionChatProps) {
         const routedToScratchlist = shouldRouteToScratchlist(scratchlistMode, attachments, scheduledAt)
         const deliveryMode = resolveMessageDeliveryMode({
             agentFlavor,
-            canSteer: isSteeringSupportedForSession(props.session.metadata)
-                && (agentFlavor === 'codex'
-                    ? props.session.thinking
-                    : agentFlavor === 'pi'
-                        ? props.session.thinking
-                        : props.session.agentState?.steeringActive === true)
-                && !controlledByUser,
+            canSteer: canSteerSessionSend({
+                agentFlavor,
+                metadata: props.session.metadata,
+                thinking: props.session.thinking,
+                steeringActive: props.session.agentState?.steeringActive === true,
+                controlledByUser,
+            }),
             // Do not use assistant-ui's broader `isRunning` here: a
             // child-agent run is not the Pi main session's steer target.
-            isSessionThinking: props.session.thinking,
+            // For Codex, the hub resolves the actual native turn immediately
+            // after persisting this localId. A stale mobile SSE `thinking`
+            // flag must not downgrade an ordinary follow-up to queue-only.
+            isSessionThinking: agentFlavor === 'codex' ? true : props.session.thinking,
             intent,
             scheduledAt,
             routesToScratchlist: routedToScratchlist,
@@ -2072,11 +2089,13 @@ function SessionChatInner(props: SessionChatProps) {
                                     // Restore the schedule so the clock button re-activates
                                     updatePendingSchedule(restored)
                                 }}
-                                canSteer={isSteeringSupportedForSession(props.session.metadata)
-                                    && (agentFlavor === 'codex' || agentFlavor === 'pi'
-                                        ? props.session.thinking
-                                        : props.session.agentState?.steeringActive === true)
-                                    && !controlledByUser}
+                                canSteer={canSteerSessionSend({
+                                    agentFlavor,
+                                    metadata: props.session.metadata,
+                                    thinking: props.session.thinking,
+                                    steeringActive: props.session.agentState?.steeringActive === true,
+                                    controlledByUser,
+                                })}
                             />
                         </div>
 

@@ -961,13 +961,13 @@ describe('useSendMessage', () => {
 
 
 describe('steering failure safety', () => {
-    it.each(['rejected', 'network'])('keeps a saved message when steering fails: %s', async (failure) => {
-        const send = vi.fn(async () => {})
+    it.each(['rejected', 'acknowledgement-lost'])('keeps a saved message when hub steering fails: %s', async (failure) => {
+        const send = vi.fn(async () => ({ ok: true, delivery: {
+            status: 'failed' as const,
+            error: failure === 'rejected' ? 'Steering rejected' : 'Message saved; steering acknowledgement unavailable. Do not resend.',
+            localId: 'local-id-1',
+        } }))
         const api = createMockApi(send)
-        api.steerMessage = vi.fn(async () => {
-            if (failure === 'network') throw new Error('Connection lost')
-            return { status: 'failed' as const, error: 'Turn ended', localId: 'local-id-1' }
-        })
         const onError = vi.fn()
         const onSuccess = vi.fn()
         const onSteerError = vi.fn()
@@ -981,15 +981,13 @@ describe('steering failure safety', () => {
 })
 
 
-it('does not requeue a message consumed before the steering response', async () => {
+it('does not requeue a message consumed before the combined send response', async () => {
     const { getMessageWindowState, updateMessageStatus } = await import('@/lib/message-window-store')
-    const response = deferred<Awaited<ReturnType<ApiClient['steerMessage']>>>()
-    const api = createMockApi()
-    api.steerMessage = vi.fn(() => response.promise)
+    const response = deferred<{ ok: boolean, delivery: { status: 'steered', localId: string } }>()
+    const api = createMockApi(() => response.promise)
     const { result } = renderHook(() => useSendMessage(api, 'session-A', { isSessionThinking: true }), { wrapper: createWrapper() })
     await act(async () => { await result.current.sendMessage('adjust', undefined, null, 'steer') })
-    await waitFor(() => expect(api.steerMessage).toHaveBeenCalled())
     vi.mocked(getMessageWindowState).mockReturnValueOnce({ messages: [{ localId: 'local-id-1', invokedAt: 123 }] } as ReturnType<typeof getMessageWindowState>)
-    await act(async () => { response.resolve({ status: 'steered', localId: 'local-id-1' }) })
+    await act(async () => { response.resolve({ ok: true, delivery: { status: 'steered', localId: 'local-id-1' } }) })
     await waitFor(() => expect(updateMessageStatus).toHaveBeenLastCalledWith('session-A', 'local-id-1', 'sent'))
 })
