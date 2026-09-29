@@ -7,8 +7,9 @@ type SpawnResult = { type: 'success'; sessionId: string } | { type: 'error'; mes
 
 function deferred<T>() {
     let resolve!: (value: T) => void
-    const promise = new Promise<T>((done) => { resolve = done })
-    return { promise, resolve }
+    let reject!: (reason: unknown) => void
+    const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail })
+    return { promise, resolve, reject }
 }
 
 async function flush(): Promise<void> {
@@ -158,6 +159,32 @@ describe('ordinary resume coalescing', () => {
             gate.resolve({ type: 'success', sessionId: session.id })
             await expect(allowed).resolves.toEqual({ type: 'success', sessionId: session.id })
         } finally {
+            engine.stop()
+        }
+    })
+
+    it('releases an exceptional runner failure without caching the rejected promise', async () => {
+        const { engine, session } = fixture()
+        const gate = deferred<SpawnResult>()
+        let attempt = 0
+        const calls = installSpawn(engine, () => ++attempt === 1
+            ? gate.promise
+            : Promise.resolve({ type: 'success', sessionId: session.id }))
+        try {
+            const results = Promise.allSettled([
+                engine.resumeSession(session.id, 'default'),
+                engine.resumeSession(session.id, 'default'),
+            ])
+            await flush()
+            expect(calls()).toBe(1)
+            gate.reject(new Error('runner transport closed'))
+            expect((await results).map((result) => result.status)).toEqual(['rejected', 'rejected'])
+            await expect(engine.resumeSession(session.id, 'default')).resolves.toEqual({
+                type: 'success', sessionId: session.id,
+            })
+            expect(calls()).toBe(2)
+        } finally {
+            gate.resolve({ type: 'error', message: 'fixture cleanup' })
             engine.stop()
         }
     })

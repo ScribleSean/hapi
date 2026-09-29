@@ -186,6 +186,8 @@ export class SyncEngine {
     private inactivityTimer: NodeJS.Timeout | null = null
     /** Sessions that emitted `session-ready` (Cursor ACP or validated Pi get_state). */
     private readonly sessionReadyIds = new Set<string>()
+    /** One ordinary native resume per namespace/session, shared by concurrent clients. */
+    private readonly sessionResumesInFlight = new Map<string, Promise<ResumeSessionResult>>()
     /** Same-ID PTY rows with a resume currently in flight. */
     private readonly ptyResumeInFlightIds = new Set<string>()
     /** PTY rows kept fail-closed after a metadata write/clear failure. */
@@ -2876,6 +2878,37 @@ export class SyncEngine {
     }
 
     async resumeSession(sessionId: string, namespace: string, opts?: { permissionMode?: PermissionMode }): Promise<ResumeSessionResult> {
+        const access = this.sessionCache.resolveSessionAccess(sessionId, namespace)
+        // PTY and Pi already have durable ownership/quarantine handling. Preserve
+        // those recovery contracts, including their explicit in-progress errors.
+        if (!access.ok
+            || access.session.agentState?.startingMode === 'pty'
+            || this.resolveFlavor(access.session) === 'pi') {
+            return this.performSessionResume(sessionId, namespace, opts)
+        }
+
+        const key = JSON.stringify([namespace, access.sessionId])
+        const existing = this.sessionResumesInFlight.get(key)
+        if (existing) return existing
+
+        // Reserve before any async migration, runner RPC or readiness check.
+        // A phone and desktop opening the same inactive bot must not launch
+        // competing writers or independently merge its conversation.
+        const permissionMode = opts?.permissionMode
+        const pending = Promise.resolve().then(() => this.performSessionResume(
+            access.sessionId, namespace, { permissionMode }
+        ))
+        this.sessionResumesInFlight.set(key, pending)
+        try {
+            return await pending
+        } finally {
+            if (this.sessionResumesInFlight.get(key) === pending) {
+                this.sessionResumesInFlight.delete(key)
+            }
+        }
+    }
+
+    private async performSessionResume(sessionId: string, namespace: string, opts?: { permissionMode?: PermissionMode }): Promise<ResumeSessionResult> {
         const access = this.sessionCache.resolveSessionAccess(sessionId, namespace)
         if (!access.ok) {
             return {
