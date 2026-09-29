@@ -124,6 +124,7 @@ import { AgentTerminalView } from '@/components/AgentTerminal/AgentTerminalView'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { VoiceBackendSession, registerSessionStore, registerVoiceHooksStore, voiceHooks } from '@/realtime'
 import { isRemoteTerminalSupported } from '@/utils/terminalSupport'
+import type { SessionAutoConnectStatus } from '@/hooks/useSessionAutoConnect'
 
 type SessionModelSelection = { provider: string; modelId: string } | string | null
 
@@ -568,6 +569,8 @@ type SessionChatProps = {
     cursorChatOnDisk?: boolean
     reopenDisabledReason?: string
     reopenHint?: string
+    autoConnectStatus?: SessionAutoConnectStatus
+    onRetryAutoConnect?: () => void
     messages: DecryptedMessage[]
     messagesWarning: string | null
     hasMoreMessages: boolean
@@ -1931,9 +1934,26 @@ function SessionChatInner(props: SessionChatProps) {
 
             {sessionInactive ? (
                 <div className="mx-auto w-full max-w-content bg-[var(--app-subtle-bg)] p-3 text-center text-sm text-[var(--app-hint)]">
-                    {inactiveCanResume
+                    {props.autoConnectStatus ? (
+                        <div className="flex items-center justify-center gap-2">
+                            <span>{props.autoConnectStatus.state === 'connecting'
+                                ? t('session.reconnect.connecting')
+                                : `${t('session.reconnect.unavailable')}: ${props.autoConnectStatus.message}`}</span>
+                            {props.autoConnectStatus.state === 'unavailable' && props.onRetryAutoConnect ? (
+                                <button
+                                    type="button"
+                                    className="rounded border border-[var(--app-border)] px-2 py-0.5 text-xs text-[var(--app-fg)] hover:bg-[var(--app-secondary-bg)]"
+                                    onClick={props.onRetryAutoConnect}
+                                >
+                                    {t('session.reconnect.retry')}
+                                </button>
+                            ) : null}
+                        </div>
+                    ) : props.session.metadata?.lifecycleState === 'archived'
+                        ? t('session.reconnect.archived')
+                        : (inactiveCanResume
                         ? t('session.inactive.autoResume')
-                        : t('session.inactive.cannotResume')}
+                        : t('session.inactive.cannotResume'))}
                 </div>
             ) : null}
 

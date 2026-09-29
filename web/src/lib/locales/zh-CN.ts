@@ -226,6 +226,13 @@ export default {
   'session.inactive.cannotResume': '此会话已停止，无法恢复。',
 
   // Session header
+  'session.reconnect.connecting': '正在连接此会话…',
+  'session.reconnect.unavailable': '不可用',
+  'session.reconnect.retry': '重试',
+  'session.reconnect.machineUnknown': '该会话没有已记录的机器。',
+  'session.reconnect.machineOffline': '记录的机器已离线或不可用。',
+  'session.reconnect.archived': '此会话已归档。',
+  'session.reconnect.identityMissing': '此会话没有可恢复的原生身份。',
   'session.title': '文件',
   'session.view.returnToChat': '返回会话',
   'session.more': '更多操作',

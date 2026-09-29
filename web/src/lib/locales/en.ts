@@ -226,6 +226,13 @@ export default {
   // Session inactive
   'session.inactive.autoResume': 'This session is inactive. Send a message to resume.',
   'session.inactive.cannotResume': 'This session is inactive and cannot be resumed.',
+  'session.reconnect.connecting': 'Connecting to this session…',
+  'session.reconnect.unavailable': 'Unavailable',
+  'session.reconnect.retry': 'Retry',
+  'session.reconnect.machineUnknown': 'The session does not have a recorded machine.',
+  'session.reconnect.machineOffline': 'The recorded machine is offline or unavailable.',
+  'session.reconnect.archived': 'This session is archived.',
+  'session.reconnect.identityMissing': 'This session has no resumable native identity.',
 
   // Session header
   'session.title': 'Files',
