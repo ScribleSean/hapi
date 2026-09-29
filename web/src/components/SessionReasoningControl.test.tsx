@@ -38,6 +38,14 @@ describe('sidebar reasoning controls', () => {
         await waitFor(() => expect(methods.setModelReasoningEffort).toHaveBeenCalledWith('a', 'ultra'))
         expect(await screen.findByText(/1 applied/)).toBeTruthy()
     })
+    it('uses the theme button tokens for its primary action', async () => {
+        const { api } = setup()
+        wrapper(<SessionReasoningControl api={api} sessions={[sessions[0]]} />)
+        fireEvent.click(screen.getByRole('button', { name: 'Bot settings for Alpha' }))
+        const apply = await screen.findByRole('button', { name: 'Apply to 1 bot' })
+        expect(apply).toHaveClass('bg-[var(--app-button)]')
+        expect(apply).toHaveClass('text-[var(--app-button-text)]')
+    })
     it('previews offline exclusions, supports exact bulk choices, and reports the results', async () => {
         const { api, methods } = setup()
         wrapper(<SessionReasoningControl api={api} sessions={sessions} bulk />)

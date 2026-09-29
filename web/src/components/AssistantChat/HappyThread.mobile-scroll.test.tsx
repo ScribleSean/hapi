@@ -13,7 +13,7 @@ vi.mock('@assistant-ui/react', async (importOriginal) => {
     return {
         ...actual,
         useAuiState: (selector: (state: unknown) => unknown) => selector({
-            thread: { extras: undefined }
+            thread: { extras: undefined, messages: [] }
         }),
         unstable_useThreadMessageIds: () => [],
         ThreadPrimitive: {
