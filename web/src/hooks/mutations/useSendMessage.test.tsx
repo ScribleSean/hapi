@@ -31,7 +31,7 @@ function createWrapper() {
     }
 }
 
-function createMockApi(sendMessage: (...args: unknown[]) => Promise<void> = async () => {}): ApiClient {
+function createMockApi(sendMessage: (...args: unknown[]) => Promise<unknown> = async () => ({})): ApiClient {
     return { sendMessage, steerMessage: vi.fn(async () => ({ status: 'steered' })) } as unknown as ApiClient
 }
 
@@ -107,7 +107,7 @@ describe('useSendMessage', () => {
         })
     })
 
-    it('saves once before steering and retains intent on the optimistic message', async () => {
+    it('uses one steer-intent POST and retains intent on the optimistic message', async () => {
         const sendMock = vi.fn(async () => {})
         const api = createMockApi(sendMock)
         const { appendOptimisticMessage } = await import('@/lib/message-window-store')
@@ -128,10 +128,10 @@ describe('useSendMessage', () => {
                 'local-id-1',
                 undefined,
                 null,
-                'queue',
+                'steer',
             )
         })
-        await waitFor(() => expect(api.steerMessage).toHaveBeenCalledWith('session-A', 'local-id-1'))
+        expect(api.steerMessage).not.toHaveBeenCalled()
         expect(appendOptimisticMessage).toHaveBeenCalledWith(
             'session-A',
             expect.objectContaining({
@@ -140,6 +140,26 @@ describe('useSendMessage', () => {
                 }),
             }),
         )
+    })
+
+    it('keeps a saved failed steer queued without a second request', async () => {
+        const sendMock = vi.fn(async () => ({ ok: true, localId: 'local-id-1', delivery: { status: 'failed', localId: 'local-id-1', error: 'Message saved; steering acknowledgement unavailable. Do not resend.' } }))
+        const api = createMockApi(sendMock)
+        const onSteerError = vi.fn()
+        const { result } = renderHook(() => useSendMessage(api, 'session-A', { onSteerError, isSessionThinking: true }), { wrapper: createWrapper() })
+        await act(async () => { await result.current.sendMessage('adjust', undefined, null, 'steer') })
+        await waitFor(() => expect(onSteerError).toHaveBeenCalled())
+        expect(sendMock).toHaveBeenCalledOnce()
+        expect(api.steerMessage).not.toHaveBeenCalled()
+    })
+
+    it('does not surface a failure when a turn ended after the steer-intent POST', async () => {
+        const api = createMockApi(async () => ({ ok: true, delivery: { status: 'failed', localId: 'local-id-1', error: 'No active turn' } }))
+        const onSteerError = vi.fn()
+        const { result } = renderHook(() => useSendMessage(api, 'session-A', { onSteerError }), { wrapper: createWrapper() })
+        await act(async () => { await result.current.sendMessage('normal follow-up', undefined, null, 'steer') })
+        await waitFor(() => expect(result.current.sendSettlement?.status).toBe('success'))
+        expect(onSteerError).not.toHaveBeenCalled()
     })
 
     it('calls onSuccess with resolved session ID, not the original', async () => {

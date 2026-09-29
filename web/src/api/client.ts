@@ -530,8 +530,8 @@ export class ApiClient {
         attachments?: AttachmentMetadata[],
         scheduledAt?: number | null,
         deliveryMode?: MessageDeliveryMode,
-    ): Promise<void> {
-        await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/messages`, {
+    ): Promise<{ ok?: boolean, localId?: string, delivery?: SteerQueuedMessageResponse }> {
+        return await this.request<{ ok?: boolean, localId?: string, delivery?: SteerQueuedMessageResponse }>(`/api/sessions/${encodeURIComponent(sessionId)}/messages`, {
             method: 'POST',
             body: JSON.stringify({
                 text,
