@@ -145,9 +145,9 @@ describe('classifyNoSchemeHref — fail-closed (#1452)', () => {
         })
     })
 
-    it('renders absolute paths outside the workspace as inert', () => {
+    it('offers path details without granting outside-workspace access', () => {
         expect(classifyNoSchemeHref('/etc/passwd.sh', { workspacePath: workspace })).toEqual({
-            action: 'inert',
+            action: 'details', path: '/etc/passwd.sh',
         })
     })
 
@@ -185,7 +185,7 @@ describe('classifyNoSchemeHref — fail-closed (#1452)', () => {
 
     it('rejects tilde paths that lexically escape the workspace via ..', () => {
         expect(classifyNoSchemeHref('~/coding/hapi/../secret.ts', { workspacePath: workspace })).toEqual({
-            action: 'inert',
+            action: 'details', path: '/home/ada/coding/hapi/../secret.ts',
         })
     })
 
@@ -229,5 +229,29 @@ describe('classifyNoSchemeHref — fail-closed (#1452)', () => {
             action: 'file',
             path: '/home/ada/coding/hapi/docs/a.md',
         })
+    })
+})
+
+
+describe('explicit local path targets', () => {
+    const workspacePath = '/Users/ada/My Project'
+    it.each(['docs', 'docs/', './assets', '.config', 'README', 'archive.v1'])('routes the explicit path %s without guessing file type', (path) => {
+        expect(classifyNoSchemeHref(path, { workspacePath })).toEqual({ action: 'file', path })
+    })
+    it.each(['/Users/ada/My Project', '/Users/ada/My Project/docs/', '/Users/ada/My Project/archive.v1', '/Users/ada/My Project/README'])('accepts in-session absolute target %s', (path) => {
+        expect(classifyNoSchemeHref(encodeURI(path), { workspacePath })).toEqual({ action: 'file', path })
+    })
+    it('strips line and column from the read target', () => {
+        expect(classifyNoSchemeHref('/Users/ada/My%20Project/a.ts:12:3', { workspacePath })).toEqual({ action: 'file', path: '/Users/ada/My Project/a.ts' })
+    })
+    it.each(['/Users/ada/My Project-other/a.md', '/Users/ada/My Project/../outside/a.md', 'C:/Users/ada/My Project/a.md'])('does not grant access for %s', (path) => {
+        expect(classifyNoSchemeHref(path, { workspacePath })).toEqual({ action: 'details', path })
+    })
+    it.each(['../outside', 'docs/../../outside', '%00bad.md', 'javascript%3Aalert(1)', '//host/a.md'])('never previews unsafe target %s', (href) => {
+        expect(classifyNoSchemeHref(href, { workspacePath }).action).not.toBe('file')
+    })
+    it('preserves decoded percent escapes and filename hash characters', () => {
+        const path = 'docs/100%20done#1.md'
+        expect(classifyNoSchemeHref(path, { workspacePath, decodedPath: true })).toEqual({ action: 'file', path })
     })
 })

@@ -31,6 +31,7 @@ import { decodeFilePathCandidateHref, decodeFilePathHref, remarkFilePathLinks } 
 import { classifyNoSchemeHref } from '@/lib/markdown-href-policy'
 import { remarkSessionPathLinks } from '@/lib/remark-session-path-links'
 import { buildSessionReferencePath, parseSessionPathHref } from '@/lib/sessionReference'
+import { LocalPathDetails } from '@/components/LocalPathDetails'
 import { UriConfirmDialog } from '@/components/UriConfirmDialog'
 import { DEFAULT_OPEN_EXTERNAL_LINKS_IN_NEW_TAB, useOpenExternalLinksInNewTab } from '@/hooks/useOpenExternalLinksInNewTab'
 
@@ -536,7 +537,7 @@ function FilePathAnchor(props: ComponentPropsWithoutRef<'a'> & { filePath: strin
     const navigate = useNavigate()
     const rel = anchorProps.target === '_blank' ? (anchorProps.rel ?? 'noreferrer') : anchorProps.rel
     const search = new URLSearchParams({ path: encodeBase64(filePath), origin: 'chat' }).toString()
-    const href = `/sessions/${encodeURIComponent(sessionId)}/file?${search}`
+    const href = `${import.meta.env.BASE_URL}sessions/${encodeURIComponent(sessionId)}/file?${search}`
 
     const handleClick = (event: MouseEvent<HTMLAnchorElement>) => {
         anchorProps.onClick?.(event)
@@ -601,8 +602,8 @@ function SessionPathAnchor(props: ComponentPropsWithoutRef<'a'> & { targetSessio
  *
  * - Scheme-less hrefs (#1452 fail-closed): known app routes (`/settings`, `#`,
  *   `?`, `/sessions/…`) stay SPA-navigable; workspace file targets open via
- *   FilePathAnchor; any other path-like href renders as inert (non-clickable)
- *   text so we never paint a blue link that SPA-404s.
+ *   FilePathAnchor; outside-workspace paths show a details/copy dialog. Invalid
+ *   targets remain inert so no local path falls through to an unrelated SPA route.
  * - IANA safe schemes (https/http/mailto/irc/ircs/xmpp): navigate directly.
  * - Deny schemes (javascript/data/vbscript/file): silently block. denyOnlyTransform
  *   already strips the href to "", so href="" in DOM (belt-and-suspenders onClick
@@ -651,7 +652,14 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
         if (!chat) {
             return <>{props.children}</>
         }
-        return <FilePathAnchor {...props} filePath={filePath} sessionId={chat.sessionId} />
+        const decision = classifyNoSchemeHref(filePath, { workspacePath: chat.metadata?.path, decodedPath: true })
+        if (decision.action === 'file') {
+            return <FilePathAnchor {...props} filePath={decision.path} sessionId={chat.sessionId} />
+        }
+        if (decision.action === 'details') {
+            return <LocalPathDetails path={decision.path} workspace={chat.metadata?.path} className={props.className}>{props.children}</LocalPathDetails>
+        }
+        return <InertMarkdownHref href={filePath} className={props.className}>{props.children}</InertMarkdownHref>
     }
 
     if (targetSessionId) {
@@ -677,20 +685,15 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
         if (candidatePath) return candidatePath
         if (!href) return null
         if (/^[A-Za-z]:[\\/]/.test(href)) return href
-        // mdast→hast may percent-encode backslashes before props.href arrives.
-        if (/^[A-Za-z]:(?:%5[Cc]|\/)/.test(href)) {
-            try {
-                return decodeURIComponent(href)
-            } catch {
-                return null
-            }
-        }
+        // Preserve URI encoding until the path classifier decodes it once.
+        if (/^[A-Za-z]:(?:%5[Cc]|\/)/.test(href)) return href
         return null
     })()
 
     if (windowsPathFromHref || (href && !hasScheme(href))) {
         const decision = classifyNoSchemeHref(windowsPathFromHref ?? href!, {
             workspacePath: chat?.metadata?.path ?? null,
+            decodedPath: Boolean(candidatePath),
         })
         if (decision.action === 'file') {
             if (!chat) {
@@ -698,7 +701,10 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
             }
             return <FilePathAnchor {...props} filePath={decision.path} sessionId={chat.sessionId} />
         }
-        if (decision.action === 'inert') {
+        if (decision.action === 'details' && chat) {
+            return <LocalPathDetails path={decision.path} workspace={chat.metadata?.path} className={props.className}>{props.children}</LocalPathDetails>
+        }
+        if (decision.action === 'inert' || decision.action === 'details') {
             return <InertMarkdownHref href={href ?? windowsPathFromHref ?? ''} className={props.className}>{props.children}</InertMarkdownHref>
         }
         // action === 'navigate' → fall through (only for non-Windows scheme-less SPA)

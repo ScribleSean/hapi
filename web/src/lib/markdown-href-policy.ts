@@ -2,8 +2,8 @@
  * Fail-closed policy for scheme-less markdown hrefs in chat.
  *
  * Product rule (#1452): never paint a clickable control that SPA-404s.
- * Prefer session file preview when the target looks like a workspace file;
- * known in-app routes stay navigable; everything else path-like is inert text.
+ * Use session file/folder preview within the workspace. Outside paths expose
+ * details without filesystem access; known in-app routes stay navigable.
  */
 
 import { COMMON_FILE_EXTENSIONS } from '@/lib/remark-file-path-links'
@@ -11,6 +11,7 @@ import { COMMON_FILE_EXTENSIONS } from '@/lib/remark-file-path-links'
 export type MarkdownHrefDecision =
     | { action: 'navigate' }
     | { action: 'file'; path: string }
+    | { action: 'details'; path: string }
     | { action: 'inert' }
 
 const STATIC_SPA_PATHS = new Set([
@@ -103,7 +104,7 @@ export function expandTildePath(path: string, workspacePath: string | null | und
 
 /** Lexically resolve `.` / `..`; return null if `..` escapes above the root. */
 export function resolveLexicalPath(absPath: string): string | null {
-    const norm = absPath.replace(/\\/g, '/')
+    const norm = isWindowsAbsolutePath(absPath) ? absPath.replace(/\\/g, '/') : absPath
     const absolute = norm.startsWith('/')
     const drive = /^[A-Za-z]:/.exec(norm)
     const parts = norm.split('/')
@@ -135,8 +136,9 @@ export function isWithinWorkspace(absPath: string, workspacePath: string): boole
     const target = resolveLexicalPath(absPath)
     const root = resolveLexicalPath(workspacePath)
     if (!target || !root) return false
-    const normTarget = target.replace(/\\/g, '/').replace(/\/+$/, '')
-    const normRoot = root.replace(/\\/g, '/').replace(/\/+$/, '')
+    const normalize = (value: string) => (isWindowsAbsolutePath(value) ? value.replace(/\\/g, '/') : value).replace(/\/+$/, '')
+    const normTarget = normalize(target)
+    const normRoot = normalize(root)
     // Windows filesystems are case-insensitive; compare folded when both sides
     // are drive-qualified so `c:\Users\…` matches `C:\Users\…`.
     const windows = isWindowsAbsolutePath(normTarget) && isWindowsAbsolutePath(normRoot)
@@ -154,14 +156,6 @@ function isRepoRelativeCandidate(path: string): boolean {
     return hasKnownFileExtension(path)
 }
 
-function looksPathLike(path: string): boolean {
-    if (!path) return false
-    if (path === '~' || path.startsWith('~/') || path.startsWith('./') || path.startsWith('../')) return true
-    if (path.startsWith('/') || isWindowsAbsolutePath(path)) return true
-    if (path.includes('/') || path.includes('\\')) return true
-    return hasKnownFileExtension(path)
-}
-
 /**
  * Classify a scheme-less markdown href for the chat <A> renderer.
  *
@@ -169,7 +163,7 @@ function looksPathLike(path: string): boolean {
  */
 export function classifyNoSchemeHref(
     href: string,
-    options: { workspacePath?: string | null } = {}
+    options: { workspacePath?: string | null; decodedPath?: boolean } = {}
 ): MarkdownHrefDecision {
     const trimmed = href.trim()
     if (!trimmed) return { action: 'inert' }
@@ -179,49 +173,42 @@ export function classifyNoSchemeHref(
 
     if (isKnownSpaHref(trimmed)) return { action: 'navigate' }
 
-    const { path: rawPath } = splitHrefMeta(trimmed)
+    const rawPath = options.decodedPath ? trimmed : splitHrefMeta(trimmed).path
     // mdast→hast percent-encodes spaces etc.; compare against literal workspace.
     let decodedPath: string
     try {
-        decodedPath = decodeURIComponent(rawPath)
+        decodedPath = options.decodedPath ? rawPath : decodeURIComponent(rawPath)
     } catch {
         return { action: 'inert' }
     }
+    if (/[\x00-\x1F\x7F]/.test(decodedPath)) return { action: 'inert' }
     const path = stripLineSuffix(decodedPath)
     const workspacePath = options.workspacePath ?? null
 
-    if (isRepoRelativeCandidate(path)) {
+    const unavailable = (target: string): MarkdownHrefDecision => workspacePath
+        ? { action: 'details', path: target }
+        : { action: 'inert' }
+
+    // These are session paths, never URLs on the browser or hub machine.
+    // The authenticated session RPC still enforces the filesystem boundary.
+    if (isWindowsAbsolutePath(path) || path.startsWith('/')) {
+        if (!workspacePath || !isWithinWorkspace(path, workspacePath)) return unavailable(path)
         return { action: 'file', path }
     }
-
-    // Absolute / tilde targets need workspace metadata so we can fail closed on
-    // out-of-tree paths (remark deliberately does not rewrite POSIX abs).
-    if (isWindowsAbsolutePath(path) && hasKnownFileExtension(path)) {
-        if (!workspacePath || !isWithinWorkspace(path, workspacePath)) {
-            return { action: 'inert' }
-        }
-        return { action: 'file', path }
-    }
-
-    if (path.startsWith('/') && hasKnownFileExtension(path)) {
-        if (!workspacePath || !isWithinWorkspace(path, workspacePath)) {
-            return { action: 'inert' }
-        }
-        return { action: 'file', path }
-    }
-
     if (path.startsWith('~/') || path === '~') {
-        if (!hasKnownFileExtension(path)) return { action: 'inert' }
         const expanded = expandTildePath(path, workspacePath)
-        if (!expanded) return { action: 'inert' }
-        if (!workspacePath || !isWithinWorkspace(expanded, workspacePath)) {
-            return { action: 'inert' }
-        }
+        if (!expanded) return unavailable(path)
+        if (!workspacePath || !isWithinWorkspace(expanded, workspacePath)) return unavailable(expanded)
         return { action: 'file', path: expanded }
     }
 
-    if (looksPathLike(path)) return { action: 'inert' }
+    // Do not turn traversal, UNC paths or URI schemes into relative files.
+    const windows = Boolean(workspacePath && isWindowsAbsolutePath(workspacePath))
+    const parts = windows ? path.split(/[\\/]/) : path.split('/')
+    if (path.startsWith('\\') || path.includes(':') || parts.includes('..')) return { action: 'inert' }
 
-    // Non-path leftovers (rare bare tokens) — do not invent SPA routes.
+    // Explicit relative links also name folders and extensionless files.
+    // Their actual type is resolved by the existing session viewer after click.
+    if (isRepoRelativeCandidate(path) || (workspacePath && path)) return { action: 'file', path }
     return { action: 'inert' }
 }

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useParams, useSearch } from '@tanstack/react-router'
+import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import type { GitCommandResponse } from '@/types/api'
 import { FileIcon } from '@/components/FileIcon'
+import { DirectoryTree } from '@/components/SessionFiles/DirectoryTree'
 import { CopyIcon, CheckIcon, WrapIcon } from '@/components/icons'
 import { useAppContext } from '@/lib/app-context'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
@@ -11,7 +12,9 @@ import { formatDiffError, formatReadFileError } from '@/lib/files-i18n'
 import { queryKeys } from '@/lib/query-keys'
 import { langAlias, useShikiHighlighter } from '@/lib/shiki'
 import { useTranslation } from '@/lib/use-translation'
-import { decodeBase64 } from '@/lib/utils'
+import { decodeBase64, encodeBase64 } from '@/lib/utils'
+import { DEFAULT_DIRECTORY_SORT } from '@/lib/directory-sort'
+import { PRESERVE_SESSION_SIDEBAR_SCROLL } from '@/lib/sessionNavigation'
 import { ImagePreview } from '@/components/ImagePreview'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
 import { formatFileMetadata } from '@/lib/file-metadata'
@@ -238,6 +241,7 @@ export default function FilePage() {
     const { copied: pathCopied, copy: copyPath } = useCopyToClipboard()
     const { copied: contentCopied, copy: copyContent } = useCopyToClipboard()
     const goBack = useAppGoBack()
+    const navigate = useNavigate()
     const { sessionId } = useParams({ from: '/sessions/$sessionId/file' })
     const search = useSearch({ from: '/sessions/$sessionId/file' })
     const encodedPath = typeof search.path === 'string' ? search.path : ''
@@ -269,6 +273,40 @@ export default function FilePage() {
         },
         enabled: Boolean(api && sessionId && filePath)
     })
+
+    // Chat links can name folders without a trailing slash. Only try the same
+    // session's directory API after an explicit failed file read, and retain
+    // its working-directory boundary. Ordinary diff/file routes stay unchanged.
+    const directoryFallbackEnabled = search.origin === 'chat'
+        && staged === undefined
+        && fileQuery.data?.success === false
+    const directoryQuery = useQuery({
+        queryKey: queryKeys.sessionDirectory(sessionId, filePath),
+        queryFn: async () => {
+            if (!api || !sessionId || !filePath) {
+                throw new Error('Missing session or path')
+            }
+            const result = await api.listSessionDirectory(sessionId, filePath)
+            return {
+                entries: result.success ? (result.entries ?? []) : [],
+                error: result.success ? null : (result.error ?? 'Failed to list directory'),
+            }
+        },
+        enabled: Boolean(api && sessionId && filePath && directoryFallbackEnabled),
+    })
+    const isDirectory = directoryFallbackEnabled
+        && !directoryQuery.isError
+        && directoryQuery.data?.error === null
+    const directoryLoading = directoryFallbackEnabled && directoryQuery.isLoading
+
+    const handleOpenDirectoryFile = useCallback((path: string) => {
+        navigate({
+            to: '/sessions/$sessionId/file',
+            params: { sessionId },
+            search: { path: encodeBase64(path), origin: 'chat' },
+            ...PRESERVE_SESSION_SIDEBAR_SCROLL,
+        })
+    }, [navigate, sessionId])
 
     const diffContent = diffQuery.data?.success ? (diffQuery.data.stdout ?? '') : ''
     const diffError = extractCommandError(diffQuery.data)
@@ -347,11 +385,11 @@ export default function FilePage() {
     // saved position once content has been mounted, but do not overwrite
     // user scrolling when a query refreshes the same file.
     useEffect(() => {
-        if (diffQuery.isLoading || fileQuery.isLoading) return
+        if (diffQuery.isLoading || fileQuery.isLoading || directoryLoading) return
         if (restoredScrollKeyRef.current === fileScrollKey) return
         restoreFileScroll()
         restoredScrollKeyRef.current = fileScrollKey
-    }, [diffQuery.isLoading, fileQuery.isLoading, fileScrollKey, restoreFileScroll])
+    }, [diffQuery.isLoading, fileQuery.isLoading, directoryLoading, fileScrollKey, restoreFileScroll])
 
     const setMarkdownPreviewMode = (mode: MarkdownPreviewMode) => {
         setMarkdownMode(mode)
@@ -372,10 +410,18 @@ export default function FilePage() {
         }
     }, [diffSuccess, diffFailed, diffContent, imageMimeType])
 
-    const loading = diffQuery.isLoading || fileQuery.isLoading
-    const fileError = fileContentResult && !fileContentResult.success
+    const loading = (!isDirectory && diffQuery.isLoading) || fileQuery.isLoading || directoryLoading
+    const readError = fileContentResult && !fileContentResult.success
         ? (fileContentResult.error ?? 'Failed to read file')
+        : fileQuery.error instanceof Error ? fileQuery.error.message : null
+    const directoryError = directoryFallbackEnabled
+        ? (directoryQuery.data?.error ?? (directoryQuery.error instanceof Error ? directoryQuery.error.message : null))
         : null
+    // A failed directory probe must not replace a useful file error (for
+    // example, EACCES with ENOTDIR). Prefer it when the read identified a
+    // directory or supplied no useful detail.
+    const preferDirectoryError = !readError || readError === 'Failed to read file' || /^EISDIR\b/.test(readError)
+    const fileError = preferDirectoryError ? (directoryError ?? readError) : readError
     const missingPath = !filePath
     const diffErrorMessage = diffError ? formatDiffError(diffError, t) : null
     const fileErrorMessage = fileError ? formatReadFileError(fileError, t) : null
@@ -401,7 +447,7 @@ export default function FilePage() {
 
             <div className="bg-[var(--app-bg)]">
                 <div className="mx-auto w-full max-w-content px-3 py-2 flex items-center gap-2 border-b border-[var(--app-divider)]">
-                    <FileIcon fileName={fileName} size={20} />
+                    {!isDirectory ? <FileIcon fileName={fileName} size={20} /> : null}
                     <span className="min-w-0 flex-1 truncate text-xs text-[var(--app-hint)]">{filePath || t('file.page.unknownPath')}</span>
                     <button
                         type="button"
@@ -424,7 +470,7 @@ export default function FilePage() {
                 </div>
             </div>
 
-            {diffContent || (markdownFile && displayMode === 'file') ? (
+            {!directoryFallbackEnabled && (diffContent || (markdownFile && displayMode === 'file')) ? (
                 <div className="bg-[var(--app-bg)]">
                     <div className="mx-auto w-full max-w-content px-3 py-2 flex items-center gap-2 border-b border-[var(--app-divider)]">
                         {diffContent ? (
@@ -470,7 +516,7 @@ export default function FilePage() {
 
             <div ref={fileScrollRef} data-hapi-file-scroll="true" className="app-scroll-y flex-1 min-h-0">
                 <div className="mx-auto w-full max-w-content p-4">
-                    {diffErrorMessage ? (
+                    {!directoryFallbackEnabled && diffErrorMessage ? (
                         <div className="mb-3 rounded-md bg-amber-500/10 p-2 text-xs text-[var(--app-hint)]">
                             {diffErrorMessage}
                         </div>
@@ -479,6 +525,17 @@ export default function FilePage() {
                         <div className="text-sm text-[var(--app-hint)]">{t('file.page.missingPath')}</div>
                     ) : loading ? (
                         <FileContentSkeleton label={t('loading.file')} />
+                    ) : isDirectory ? (
+                        <DirectoryTree
+                            key={`${sessionId}:${filePath}`}
+                            api={api}
+                            sessionId={sessionId}
+                            rootPath={filePath}
+                            rootLabel={fileName}
+                            rootEntries={directoryQuery.data!.entries}
+                            onOpenFile={handleOpenDirectoryFile}
+                            sort={DEFAULT_DIRECTORY_SORT}
+                        />
                     ) : fileErrorMessage ? (
                         <div className="text-sm text-[var(--app-hint)]">{fileErrorMessage}</div>
                     ) : displayMode === 'diff' && diffContent ? (

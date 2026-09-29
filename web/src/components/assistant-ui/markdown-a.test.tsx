@@ -14,6 +14,8 @@ import { render, screen, fireEvent, cleanup, act, waitFor } from '@testing-libra
 import React from 'react'
 import { defaultComponents, classifyScheme, denyOnlyTransform, UriConfirmProvider } from '@/components/assistant-ui/markdown-text'
 import { HappyChatProvider, type HappyChatContextValue } from '@/components/AssistantChat/context'
+import { MarkdownRenderer } from '@/components/MarkdownRenderer'
+import { decodeBase64 } from '@/lib/utils'
 import { I18nProvider } from '@/lib/i18n-context'
 import type { ApiClient } from '@/api/client'
 
@@ -328,22 +330,22 @@ describe('markdown <A> component — fail-closed path-like hrefs (#1452)', () =>
         expect(document.querySelector('.aui-md-a-inert')).toBeNull()
     })
 
-    it('keeps outside-workspace absolute file href inert even with chat present', () => {
+    it('offers details for outside-workspace absolute file hrefs', () => {
         renderA(
             { href: '/etc/passwd.sh', children: 'etc' },
             chatContext()
         )
         expect(document.querySelector('a')).toBeNull()
-        expect(document.querySelector('.aui-md-a-inert')?.textContent).toBe('etc')
+        expect(screen.getByRole('button', { name: 'etc' })).toBeTruthy()
     })
 
-    it('keeps outside-workspace Windows absolute href inert despite drive colon looking like a scheme', () => {
+    it('offers details for outside-workspace Windows paths without invoking a scheme', () => {
         renderA(
             { href: 'D:/outside/secret.ts#L1', children: 'win' },
             chatContext()
         )
         expect(document.querySelector('a')).toBeNull()
-        expect(document.querySelector('.aui-md-a-inert')?.textContent).toBe('win')
+        expect(screen.getByRole('button', { name: 'win' })).toBeTruthy()
     })
 
     it('routes hapi-file-candidate Windows href through containment to FilePathAnchor', () => {
@@ -398,7 +400,7 @@ describe('markdown <A> component — fail-closed path-like hrefs (#1452)', () =>
             chatContext()
         )
         expect(document.querySelector('a')).toBeNull()
-        expect(document.querySelector('.aui-md-a-inert')?.textContent).toBe('win')
+        expect(screen.getByRole('button', { name: 'win' })).toBeTruthy()
     })
 
     it('expands ~/ and routes to FilePathAnchor when workspace metadata is present', () => {
@@ -528,5 +530,50 @@ describe('intra-tab cross-provider sync (schemeListeners emitter)', () => {
         })
 
         openSpy.mockRestore()
+    })
+})
+
+
+describe('rendered Markdown local links', () => {
+    function renderLink(content: string, workspace = '/Users/ada/My Project') {
+        return render(<I18nProvider><HappyChatProvider value={chatContext({ metadata: { path: workspace, host: 'owning-mac' } })}><MarkdownRenderer content={content} /></HappyChatProvider></I18nProvider>)
+    }
+    it.each([
+        ['[Report](</Users/ada/My Project/notes/Report.md:12:3>)', '/Users/ada/My Project/notes/Report.md', '/Users/ada/My Project'],
+        ['[Report](<C:/Users/ada/My Project/Report.md:12>)', 'C:/Users/ada/My Project/Report.md', 'C:/Users/ada/My Project'],
+        ['[Report](<C:\\Users\\ada\\My Project\\Report.md>)', 'C:\\Users\\ada\\My Project\\Report.md', 'C:\\Users\\ada\\My Project'],
+        ['[Report](docs/Report%20one.md)', 'docs/Report one.md', '/Users/ada/My Project'],
+        ['[Report](docs/100%2520done%231.md)', 'docs/100%20done#1.md', '/Users/ada/My Project'],
+        ['[Report](<C:/Users/ada/My Project/100%2520done%231.md>)', 'C:/Users/ada/My Project/100%20done#1.md', 'C:/Users/ada/My Project'],
+        ['[Report](docs/archive.v1/)', 'docs/archive.v1/', '/Users/ada/My Project'],
+        ['[Report](</Users/ada/My Project/docs>)', '/Users/ada/My Project/docs', '/Users/ada/My Project'],
+        ['[Report](README)', 'README', '/Users/ada/My Project'],
+    ])('routes %s through the owning session', (content, expected, workspace) => {
+        renderLink(content, workspace)
+        const link = screen.getByRole('link', { name: 'Report' })
+        const href = new URL(link.getAttribute('href')!, 'https://hapi.test')
+        expect(href.pathname).toBe('/sessions/session-1/file')
+        expect(decodeBase64(href.searchParams.get('path')!)).toEqual({ ok: true, text: expected })
+        fireEvent.click(link)
+        expect(navigate).toHaveBeenCalledWith(expect.objectContaining({ params: { sessionId: 'session-1' }, search: expect.objectContaining({ origin: 'chat' }) }))
+    })
+    it('shows accessible details and copies the outside path without file access', async () => {
+        const clipboard = vi.fn().mockResolvedValue(undefined)
+        Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: clipboard } })
+        const path = '/Users/ada/Library/Application Support/Archive/RECOVERY.md'
+        renderLink(`[Recovery instructions](<${path}>)`)
+        expect(screen.queryByRole('link', { name: 'Recovery instructions' })).toBeNull()
+        fireEvent.click(screen.getByRole('button', { name: 'Recovery instructions' }))
+        expect(screen.getByRole('dialog')).toBeTruthy()
+        expect(screen.getByText(/Ask the agent to attach/)).toBeTruthy()
+        expect(screen.getByText(path)).toBeTruthy()
+        fireEvent.click(screen.getByRole('button', { name: 'Copy path' }))
+        await waitFor(() => expect(clipboard).toHaveBeenCalledWith(path))
+        expect(navigate).not.toHaveBeenCalled()
+    })
+    it('does not bypass containment via an internal file href', () => {
+        renderA({ href: 'hapi-file:' + encodeURIComponent('/outside/notes.md'), children: 'Outside' }, chatContext())
+        expect(screen.getByRole('button', { name: 'Outside' })).toBeTruthy()
+        expect(navigate).not.toHaveBeenCalled()
     })
 })

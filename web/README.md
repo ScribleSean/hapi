@@ -89,6 +89,9 @@ See `src/router.tsx` for route definitions.
 
 - File content display with syntax highlighting.
 - Staged/unstaged diff view.
+- Chat links to files and folders use the owning session’s authenticated file APIs. Folder targets open a directory tree after a successful directory check.
+- Paths outside the session folder show accessible path details and a copy action. Ask the agent for an attachment to download an outside file. These controls do not broaden filesystem access.
+- `:line[:column]` suffixes are removed before reading a file. Line scrolling is not implemented.
 
 ### Terminal (`src/routes/sessions/terminal.tsx`)
 

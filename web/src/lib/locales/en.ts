@@ -534,6 +534,10 @@ export default {
   // File page
   'file.page.fallbackName': 'File',
   'file.page.unknownPath': 'Unknown path',
+  'file.link.details': 'Path details',
+  'file.link.outsideWorkspace': 'This path is outside the session folder and cannot be previewed here. Ask the agent to attach the file for download. You can also copy the path to use on the owning computer.',
+  'file.link.sessionFolder': 'Session folder',
+  'file.link.copyFailed': 'Could not copy. Select and copy the path above.',
   'file.page.copyPath': 'Copy path',
   'file.page.copyContent': 'Copy file content',
   'file.page.download': 'Download file',

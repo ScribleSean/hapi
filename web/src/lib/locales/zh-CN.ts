@@ -530,6 +530,10 @@ export default {
   // File page
   'file.page.fallbackName': '文件',
   'file.page.unknownPath': '未知路径',
+  'file.link.details': '路径详情',
+  'file.link.outsideWorkspace': '此路径位于会话文件夹之外，无法在此预览。请让代理将文件作为附件发送以供下载，也可以复制路径到文件所在的电脑上使用。',
+  'file.link.sessionFolder': '会话文件夹',
+  'file.link.copyFailed': '复制失败，请选择并复制上方的路径。',
   'file.page.copyPath': '复制路径',
   'file.page.copyContent': '复制文件内容',
   'file.page.download': '下载文件',

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { ApiClient } from '@/api/client'
+import type { DirectoryEntry } from '@/types/api'
 import { FileIcon } from '@/components/FileIcon'
 import { useSessionDirectory } from '@/hooks/queries/useSessionDirectory'
 import { useFileMenuTrigger } from '@/hooks/useFileMenuTrigger'
@@ -93,6 +94,13 @@ function DirectoryErrorRow(props: { depth: number; message: string }) {
 
 type FileMenuRequestHandler = (path: string, point: AnchoredMenuPoint) => void
 
+function joinEntryPath(path: string, name: string): string {
+    if (!path) return name
+    // Forward slashes work on the owning CLI's platform. Keep backslashes
+    // intact because they may be literal characters in POSIX entry names.
+    return `${path.replace(/\/+$/, '')}/${name}`
+}
+
 function DirectoryFileRow(props: {
     fileName: string
     metadata: string | null
@@ -149,14 +157,18 @@ function DirectoryNode(props: {
     expanded: Set<string>
     onToggle: (path: string) => void
     sort: DirectorySort
+    entries?: DirectoryEntry[]
 }) {
     const { t, locale } = useTranslation()
     const toast = useToast()
     const [downloadingPath, setDownloadingPath] = useState<string | null>(null)
     const isExpanded = props.expanded.has(props.path)
-    const { entries, error, isLoading } = useSessionDirectory(props.api, props.sessionId, props.path, {
-        enabled: isExpanded
+    const directory = useSessionDirectory(props.api, props.sessionId, props.path, {
+        enabled: isExpanded && props.entries === undefined
     })
+    const entries = props.entries ?? directory.entries
+    const error = props.entries === undefined ? directory.error : null
+    const isLoading = props.entries === undefined && directory.isLoading
 
     const sortedEntries = useMemo(
         () => sortDirectoryEntries(entries, props.sort, locale),
@@ -213,7 +225,7 @@ function DirectoryNode(props: {
                 ) : (
                     <div>
                         {directories.map((entry) => {
-                            const childPath = props.path ? `${props.path}/${entry.name}` : entry.name
+                            const childPath = joinEntryPath(props.path, entry.name)
                             return (
                                 <DirectoryNode
                                     key={childPath}
@@ -232,7 +244,7 @@ function DirectoryNode(props: {
                         })}
 
                         {files.map((entry) => {
-                            const filePath = props.path ? `${props.path}/${entry.name}` : entry.name
+                            const filePath = joinEntryPath(props.path, entry.name)
                             const metadata = formatFileMetadata(entry.size, entry.modified, locale)
                             const isDownloading = downloadingPath === filePath
                             return (
@@ -269,9 +281,9 @@ function DirectoryNode(props: {
 
 const STORAGE_KEY_PREFIX = 'hapi-dir-expanded-'
 
-function readExpanded(sessionId: string): Set<string> {
+function readExpanded(storageId: string, rootPath: string): Set<string> {
     try {
-        const raw = sessionStorage.getItem(STORAGE_KEY_PREFIX + sessionId)
+        const raw = sessionStorage.getItem(STORAGE_KEY_PREFIX + storageId)
         if (raw) {
             const parsed = JSON.parse(raw)
             if (Array.isArray(parsed)) return new Set(parsed as string[])
@@ -279,7 +291,7 @@ function readExpanded(sessionId: string): Set<string> {
     } catch {
         // ignore
     }
-    return new Set([''])
+    return new Set([rootPath])
 }
 
 function writeExpanded(sessionId: string, expanded: Set<string>) {
@@ -290,19 +302,31 @@ function writeExpanded(sessionId: string, expanded: Set<string>) {
     }
 }
 
-export function DirectoryTree(props: {
+type DirectoryTreeProps = {
     api: ApiClient | null
     sessionId: string
     rootLabel: string
+    rootPath?: string
+    rootEntries?: DirectoryEntry[]
     onOpenFile: (path: string) => void
     onRequestFileMenu?: FileMenuRequestHandler
     sort: DirectorySort
-}) {
-    const [expanded, setExpanded] = useState<Set<string>>(() => readExpanded(props.sessionId))
+}
+
+export function DirectoryTree(props: DirectoryTreeProps) {
+    const storageId = props.rootPath
+        ? `${props.sessionId}:${encodeURIComponent(props.rootPath)}`
+        : props.sessionId
+    return <DirectoryTreeContent key={storageId} {...props} storageId={storageId} />
+}
+
+function DirectoryTreeContent(props: DirectoryTreeProps & { storageId: string }) {
+    const rootPath = props.rootPath ?? ''
+    const [expanded, setExpanded] = useState<Set<string>>(() => readExpanded(props.storageId, rootPath))
 
     useEffect(() => {
-        writeExpanded(props.sessionId, expanded)
-    }, [props.sessionId, expanded])
+        writeExpanded(props.storageId, expanded)
+    }, [props.storageId, expanded])
 
     const handleToggle = useCallback((path: string) => {
         setExpanded((prev) => {
@@ -321,8 +345,9 @@ export function DirectoryTree(props: {
             <DirectoryNode
                 api={props.api}
                 sessionId={props.sessionId}
-                path=""
+                path={rootPath}
                 label={props.rootLabel}
+                entries={props.rootEntries}
                 depth={0}
                 onOpenFile={props.onOpenFile}
                 onRequestFileMenu={props.onRequestFileMenu}
@@ -333,4 +358,3 @@ export function DirectoryTree(props: {
         </div>
     )
 }
-
