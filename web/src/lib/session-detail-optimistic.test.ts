@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { QueryClient } from '@tanstack/react-query'
 import { queryKeys } from '@/lib/query-keys'
 import {
+    markSessionConfirmedResumed,
     mergeSessionDetailIfActiveUnchanged,
     refreshSessionDetailPreservingActive,
 } from './session-detail-optimistic'
@@ -63,5 +64,22 @@ describe('refreshSessionDetailPreservingActive', () => {
         expect(queryClient.getQueryData(queryKeys.session(resolvedSessionId))).toEqual({
             session: { id: resolvedSessionId, active: false, title: 'sse-inactive' },
         })
+    })
+})
+
+describe('markSessionConfirmedResumed', () => {
+    it('clears only a stale archive marker after confirmed resume', () => {
+        expect(markSessionConfirmedResumed({
+            active: false,
+            metadata: { lifecycleState: 'archived', machineId: 'machine-A' },
+        })).toEqual({
+            active: true,
+            metadata: { lifecycleState: undefined, machineId: 'machine-A' },
+        })
+    })
+
+    it('does not invent a lifecycle value', () => {
+        expect(markSessionConfirmedResumed({ active: false, metadata: { lifecycleState: 'idle' } }))
+            .toEqual({ active: true, metadata: { lifecycleState: 'idle' } })
     })
 })

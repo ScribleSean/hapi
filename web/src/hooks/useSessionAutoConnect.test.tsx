@@ -55,6 +55,29 @@ describe('useSessionAutoConnect', () => {
         expect(resolveSessionId).toHaveBeenCalledTimes(1)
     })
 
+    it('attempts once when an initially offline owner becomes eligible', async () => {
+        const resolveSessionId = vi.fn(async (sessionId: string) => ({ sessionId }))
+        const initiallyOffline = options({
+            eligible: false,
+            unavailableMessage: 'Recorded machine is unavailable',
+            resolveSessionId,
+        })
+        const { result, rerender } = renderHook((next) => useSessionAutoConnect(next), {
+            initialProps: initiallyOffline,
+        })
+
+        await waitFor(() => expect(result.current.status).toEqual({
+            state: 'unavailable',
+            message: 'Recorded machine is unavailable',
+        }))
+        expect(resolveSessionId).not.toHaveBeenCalled()
+
+        rerender({ ...initiallyOffline, eligible: true })
+        await waitFor(() => expect(resolveSessionId).toHaveBeenCalledTimes(1))
+        rerender({ ...initiallyOffline, eligible: true })
+        expect(resolveSessionId).toHaveBeenCalledTimes(1)
+    })
+
     it('allows a draft send to join the in-flight resolver promise', async () => {
         const pending = deferred<{ sessionId: string }>()
         const resume = vi.fn(() => pending.promise)

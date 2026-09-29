@@ -11,6 +11,25 @@ type SessionDetailCache = {
 }
 
 /**
+ * resumeSession has confirmed that the runner accepted the session. Clear an
+ * obsolete archive presentation flag without claiming a lifecycle state the
+ * runner has not yet reported.
+ */
+export function markSessionConfirmedResumed<T extends {
+    active: boolean
+    metadata?: { lifecycleState?: string; [key: string]: unknown } | null
+}>(session: T): T {
+    if (session.metadata?.lifecycleState !== 'archived') {
+        return { ...session, active: true }
+    }
+    return {
+        ...session,
+        active: true,
+        metadata: { ...session.metadata, lifecycleState: undefined },
+    }
+}
+
+/**
  * Apply a background getSession response only when the cache still agrees on
  * `active`. If SSE already flipped active/inactive while the request was in
  * flight, keep the newer local transition instead of resurrecting a stale REST
