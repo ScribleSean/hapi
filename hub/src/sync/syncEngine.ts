@@ -66,6 +66,7 @@ import { SessionCache } from './sessionCache'
 import { ingestNotifySummaryFromMessage } from './workGraphNotifyIngest'
 import { BurnModeService } from './burnMode'
 import type { BurnModeState } from '@hapi/protocol/burnMode'
+import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 
 type PiResumeAttempt = NonNullable<NonNullable<Session['metadata']>['piResumeAttempt']>
 type PtyResumeAttempt = NonNullable<NonNullable<Session['metadata']>['ptyResumeAttempt']>
@@ -244,7 +245,13 @@ export class SyncEngine {
             sessions: namespace => this.sessionCache.getSessionsByNamespace(namespace),
             session: sessionId => this.sessionCache.getSession(sessionId),
             catalog: sessionId => this.listCodexModelsForSession(sessionId),
-            apply: (sessionId, config) => this.applySessionConfig(sessionId, config)
+            apply: (sessionId, config) => this.applySessionConfig(sessionId, config),
+            ready: (sessionId) => {
+                const listSocket = rpcRegistry.getSocketIdForMethod(`${sessionId}:${RPC_METHODS.ListCodexModels}`)
+                const configSocket = rpcRegistry.getSocketIdForMethod(`${sessionId}:${RPC_METHODS.SetSessionConfig}`)
+                const sockets = this.io.of('/cli').sockets
+                return Boolean(listSocket && configSocket && sockets.has(listSocket) && sockets.has(configSocket))
+            }
         })
         this.reloadAll()
         this.burnMode.reconcilePersisted()
