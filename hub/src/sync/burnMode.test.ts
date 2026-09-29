@@ -21,6 +21,7 @@ function fixture(items = [session('one', 'a')]) {
     })
     const service = new BurnModeService(store, {
         sessions: namespace => items.filter(item => item.namespace === namespace),
+        session: id => items.find(item => item.id === id),
         catalog: async () => ({ success: true, models: [{ id: 'm', isDefault: true, supportedReasoningEfforts: ['ultra'], serviceTiers: ['priority'] }] }),
         apply
     })
@@ -59,4 +60,46 @@ describe('BurnModeService', () => {
         target.active = true; f.service.schedule('a')
         await settle(); expect(f.apply).toHaveBeenCalledTimes(1)
     })
+
+
+    it('does not capture or restore an explicit unknown model', async () => {
+        const target = session('unknown', 'a'); target.model = 'not-in-catalog'
+        const f = fixture([target])
+        f.service.set('a', true, 0); await f.service.flush('a')
+        expect(f.apply).not.toHaveBeenCalled()
+        expect(f.service.state('a').sessions[0]?.previous).toBeNull()
+        f.service.set('a', false, 1); await f.service.flush('a')
+        expect(f.apply).not.toHaveBeenCalled()
+    })
+
+    it('does not snapshot an offline bot before it becomes eligible', async () => {
+        const target = session('late', 'a', false); const f = fixture([target])
+        f.service.set('a', true, 0); await f.service.flush('a')
+        expect(f.service.state('a').sessions[0]?.previous).toBeNull()
+        target.active = true; f.service.schedule('a'); await f.service.flush('a')
+        expect(f.apply).toHaveBeenCalledTimes(1)
+        expect(f.service.state('a').sessions[0]?.previous).toEqual({ modelReasoningEffort: null, serviceTier: null })
+    })
+
+    it('skips a native write when Ultra and Fast are already active', async () => {
+        const target = session('ready', 'a'); target.modelReasoningEffort = 'ultra'; target.serviceTier = 'fast'
+        const f = fixture([target]); f.service.set('a', true, 0); await f.service.flush('a')
+        expect(f.apply).not.toHaveBeenCalled()
+        target.serviceTier = 'standard'; f.service.schedule('a'); await f.service.flush('a')
+        expect(f.apply).toHaveBeenCalledWith('ready', { modelReasoningEffort: 'ultra', serviceTier: 'fast' })
+    })
+
+    it('restores after an ambiguous ON failure only once per OFF revision', async () => {
+        const target = session('one', 'a'); const f = fixture([target])
+        let calls = 0
+        f.apply.mockImplementation(async (_id, config) => { calls++; target.modelReasoningEffort = config.modelReasoningEffort; target.serviceTier = config.serviceTier; if (calls === 1) throw new Error('disconnect after apply') })
+        f.service.set('a', true, 0); await f.service.flush('a')
+        expect(f.service.state('a').sessions[0]?.status).toBe('failed')
+        f.service.set('a', false, 1); await f.service.flush('a')
+        expect(f.apply).toHaveBeenLastCalledWith('one', { modelReasoningEffort: null, serviceTier: null })
+        const restoredCalls = f.apply.mock.calls.length
+        f.service.schedule('a'); await f.service.flush('a')
+        expect(f.apply.mock.calls.length).toBe(restoredCalls)
+    })
+
 })
