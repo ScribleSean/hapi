@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test'
+import { Database } from 'bun:sqlite'
 import { AGENT_MESSAGE_PAYLOAD_TYPE } from '@hapi/protocol'
 import { getReasoningStreamId } from '@hapi/protocol/messages'
 import { Store } from './index'
@@ -471,6 +472,47 @@ describe('countFutureScheduledLocalMessages', () => {
         const nextAt = store.messages.minFutureScheduledAtBySessionIds([sessionA.id, sessionB.id], now)
         expect(nextAt.get(sessionA.id)).toBe(now + 60_000)
         expect(nextAt.get(sessionB.id)).toBeUndefined()
+    })
+
+    it('uses the future-scheduled session index after many immediate queued rows', () => {
+        const store = makeStore()
+        const sessionA = makeSession(store, 'sched-index-a')
+        const sessionB = makeSession(store, 'sched-index-b')
+        const now = Date.now()
+
+        for (let index = 0; index < 1_000; index++) {
+            store.messages.addMessage(sessionA.id, { text: `immediate ${index}` }, `immediate-${index}`)
+        }
+        store.messages.addMessage(sessionA.id, { text: 'future' }, 'future-a', now + 60_000)
+        store.messages.addMessage(sessionB.id, { text: 'future' }, 'future-b', now + 120_000)
+
+        const db = (store as unknown as { db: Database }).db
+        const ids = [sessionA.id, sessionB.id]
+        const placeholders = ids.map(() => '?').join(',')
+        const where = `
+            FROM messages
+            WHERE session_id IN (${placeholders})
+              AND invoked_at IS NULL
+              AND local_id IS NOT NULL
+              AND scheduled_at IS NOT NULL
+              AND scheduled_at > ?
+              AND delivery_state = 'queued'
+        `
+
+        for (const select of ['SELECT session_id, COUNT(*) AS count', 'SELECT session_id, MIN(scheduled_at) AS next_at']) {
+            const plan = db.prepare(`EXPLAIN QUERY PLAN ${select} ${where} GROUP BY session_id`)
+                .all(...ids, now) as Array<{ detail: string }>
+            expect(plan.some((row) => row.detail.includes('idx_messages_future_scheduled_by_session'))).toBe(true)
+        }
+
+        expect(store.messages.countFutureScheduledBySessionIds(ids, now)).toEqual(new Map([
+            [sessionA.id, 1],
+            [sessionB.id, 1]
+        ]))
+        expect(store.messages.minFutureScheduledAtBySessionIds(ids, now)).toEqual(new Map([
+            [sessionA.id, now + 60_000],
+            [sessionB.id, now + 120_000]
+        ]))
     })
 })
 
