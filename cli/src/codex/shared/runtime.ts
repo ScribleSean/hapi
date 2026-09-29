@@ -104,7 +104,7 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
                 try {
                     await initializeSharedClient(control);
                     // Roots remain loaded by their independent side-clients.
-                    for (const threadId of roots.keys()) await control.request('thread/resume', { threadId });
+                    for (const threadId of roots.keys()) await control.request('thread/resume', { threadId, excludeTurns: true });
                     return;
                 } catch (error) {
                     logger.debug('[Codex shared] control reconnect', error);
@@ -205,7 +205,7 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
         assertRunning();
         // Cold-resumed threads predate the control connection's automatic
         // new-thread subscription. Subscribe once without changing settings.
-        await control.request('thread/resume', { threadId });
+        await control.request('thread/resume', { threadId, excludeTurns: true });
         await root.activate(initialOptions);
         await root.session.flush();
         await persist();
@@ -254,7 +254,7 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
             }
             if (candidate !== threadId && !existing) throw new Error('Resume the parent HAPI session before attaching a child agent');
         }
-        if (request.method === 'thread/resume' && existing) return { ...request, params: existing.config(params) };
+        if (request.method === 'thread/resume' && existing) return { ...request, params: existing.config({ ...params, excludeTurns: params.excludeTurns ?? true }) };
         if (threadId) await withThreadOwnership(home, threadId, id, async () => {});
         const cwd = string(params.cwd) ?? existing?.bootstrap.workingDirectory ?? launch.cwd;
         const root = request.method === 'thread/resume' && threadId
@@ -267,7 +267,9 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
                 runtime.pendingCreations = [...runtime.pendingCreations ?? [], root.session.sessionId]; await persist();
             }
             reservations.set(key(connection, request), { root, resumeId: request.method === 'thread/resume' ? threadId : undefined });
-            return { ...request, params: root.config({ ...params, ...(request.method === 'thread/fork' ? { deferGoalContinuation: true } : {}) }) };
+            return { ...request, params: root.config({ ...params,
+                ...(request.method === 'thread/resume' ? { excludeTurns: params.excludeTurns ?? true } : {}),
+                ...(request.method === 'thread/fork' ? { deferGoalContinuation: true } : {}) }) };
         } catch (error) { prepared.delete(root); await root.close(true); throw error; }
     });
     const after = (request: Envelope, response: Envelope, connection: string): Promise<void | Envelope[]> => operation(async () => {
@@ -359,7 +361,7 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
             const params = root.config({ ...launch.threadParams, threadId });
             let response: Record<string, unknown>;
             try {
-                response = record(await root.client.request('thread/resume', params));
+                response = record(await root.client.request('thread/resume', { ...params, excludeTurns: true }));
             } catch (error) {
                 // Reopening a HAPI binding also restores its native archive.
                 // Only retry an explicit archived rejection, never a transport
@@ -367,7 +369,7 @@ export async function runSharedRuntime(options: SharedLaunchOptions, onReady?: (
                 if (!options.existingSessionId || !(error instanceof Error)
                     || !error.message.startsWith(`session ${threadId} is archived.`)) throw error;
                 await root.client.request('thread/unarchive', { threadId });
-                response = record(await root.client.request('thread/resume', params));
+                response = record(await root.client.request('thread/resume', { ...params, excludeTurns: true }));
             }
             await bind(root, response, false, options);
         } else root = await create('thread/start', { ...launch.threadParams, cwd: launch.cwd }, undefined, options);

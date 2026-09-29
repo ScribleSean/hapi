@@ -226,6 +226,8 @@ export default {
   'session.inactive.cannotResume': '此会话已停止，无法恢复。',
 
   // Session header
+  'session.history.syncing': '已连接。正在同步原生历史记录，新消息将在完成后发送。',
+  'session.history.failed': '原生历史记录同步失败。消息尚未发送，请重新连接后重试。',
   'session.reconnect.connecting': '正在连接此会话…',
   'session.reconnect.unavailable': '不可用',
   'session.reconnect.retry': '重试',

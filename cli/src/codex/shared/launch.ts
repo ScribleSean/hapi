@@ -13,6 +13,7 @@ export const SharedLaunchSchema = z.object({
     permissionMode: z.enum(['default', 'read-only', 'safe-yolo', 'yolo']).optional(),
     resumeSessionId: z.string().optional(), resumeLast: z.boolean().optional(), resumeAll: z.boolean().optional(), existingSessionId: z.string().optional(),
     model: z.string().optional(), modelReasoningEffort: z.string().optional(),
+    modelProvider: z.string().min(1).optional(),
     serviceTier: z.string().optional(), collaborationMode: z.enum(['default', 'plan']).optional(),
     workingDirectory: z.string().optional()
 });
@@ -40,7 +41,7 @@ export function sharedLaunchConfig(options: SharedLaunchOptions, cwd: string): {
     const config: Record<string, unknown> = {};
     const extraDirs: string[] = [];
     let model = options.model;
-    let provider: string | undefined;
+    let provider = options.modelProvider;
     let oss = false;
     let autoReview = false;
     for (let i = 0; i < args.length; i++) {
@@ -146,7 +147,7 @@ export async function initializeSharedClient(client: CodexAppServerClient): Prom
 
 /** Invalid IDs only: no probes may create turns, mutate threads or call a model. */
 export async function checkSharedCapabilities(client: CodexAppServerClient): Promise<void> {
-    for (const method of ['thread/queue/list', 'thread/queue/add', 'thread/queue/delete', 'thread/queue/start', 'turn/steer', 'thread/settings/update', 'thread/metadata/update', 'thread/fork', 'thread/turns/list']) {
+    for (const method of ['thread/queue/list', 'thread/queue/add', 'thread/queue/delete', 'thread/queue/start', 'turn/steer', 'thread/settings/update', 'thread/metadata/update', 'thread/fork', 'thread/turns/list', 'thread/items/list']) {
         if (!await client.supportsMethod(method)) throw new Error(`Codex lacks ${method}; upgrade to a compatible >= 0.154.0 build`);
     }
 }

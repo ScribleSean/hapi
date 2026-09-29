@@ -31,6 +31,16 @@ function params(item: unknown, turnId = 'turn') { return { threadId: 'thread', t
 function history(...items: unknown[]) { return { turns: [{ id: 'turn', status: 'completed', items }] }; }
 
 describe('shared Codex titles', () => {
+    it('keeps the newest title when paged history is projected in item chunks', async () => {
+        const f = fixture();
+        f.update(metadata => { const { name: _ignored, ...rest } = metadata; return rest as Metadata; });
+        f.projection.beginHistory();
+        await f.projection.history(history(titleItem('first', 'First')));
+        await f.projection.history(history(titleItem('second', 'Second')));
+        f.projection.endHistory();
+        expect(f.metadata().name).toBe('Second');
+    });
+
     it('renames via metadata.name so a spawn name does not hide change_title', async () => {
         const f = fixture();
         const item = titleItem('title', ' Remote title ');

@@ -8,6 +8,7 @@ import { listSlashCommands } from '@/modules/common/slashCommands';
 import { normalizeCodexModel } from '@/modules/common/codexModels';
 import { formatMessageWithAttachments } from '@/utils/attachmentFormatter';
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
+import { ThreadGoalSchema } from '@hapi/protocol/schemas';
 import { ImplementCodexPlanRequestSchema, type ImplementCodexPlanResult } from '@hapi/protocol/apiTypes';
 import { CodexAppServerClient, isIndeterminateError } from '../codexAppServerClient';
 import { buildHapiMcpBridge, type HapiMcpBridge } from '../utils/buildHapiMcpBridge';
@@ -23,6 +24,7 @@ import { record, string } from './gateway';
 import { initializeSharedClient, type SharedLaunchOptions } from './launch';
 import { inheritedSandbox, settingsMatch } from './settings';
 import { planImplementationMessageId, planProposalForItem, planProposalForTurn } from './plan';
+import { firstTurnUserMessage, readHistoryHead, streamThreadHistory, type HistoryTurn } from './history';
 
 type RuntimeSettings = NonNullable<Parameters<ApiSessionClient['keepAlive']>[2]>;
 export type RootHost = {
@@ -60,7 +62,10 @@ export class SharedCodexRoot {
     private steeringActive: boolean | undefined;
     private turnRevision = 0;
     private settingsRevision = 0;
+    private goalRevision = 0;
+    private publishedGoal: string | undefined;
     private refreshing?: Promise<void>;
+    private historySync?: Promise<void>;
     private interrupted = false;
     private closed = false;
     private stopping = false;
@@ -115,6 +120,10 @@ export class SharedCodexRoot {
             this.work = this.work.catch(() => {}).then(async () => {
                 await this.bound;
                 if (this.closed || this.stopping) return;
+                try { await this.historySync; }
+                catch {
+                    this.notice('Native history is still unavailable; the message was not sent. Reconnect before retrying.'); return;
+                }
                 const id = localId ?? randomUUID();
                 const text = formatMessageWithAttachments(message.content.text, message.content.attachments);
                 const resolved = text.trim().startsWith('/') ? await this.queue.command(id, () => this.command(text)) : text;
@@ -137,6 +146,7 @@ export class SharedCodexRoot {
             this.projection?.reset();
             this.steeringActive = undefined;
             this.publishedPlanId = undefined;
+            this.publishedGoal = undefined;
             void this.refresh().then(() => this.refreshChildren(false)).then(() => this.queue.replay())
                 .catch(error => logger.debug('[Codex shared] hub resync', error));
         });
@@ -197,13 +207,30 @@ export class SharedCodexRoot {
             // advertise a destructive operation we cannot make atomic yet.
             conversationHistory: { forkCurrent: true, forkAtMessage: true, rewindToMessage: false }
         } }));
-        this.session.updateAgentState(state => ({ ...state, controlledByUser: false, startingMode: undefined, codexPlanProposalId: null, requests: {},
+        this.session.updateAgentState(state => ({ ...state, controlledByUser: false, startingMode: undefined, codexPlanProposalId: null, codexHistorySync: null, requests: {},
             completedRequests: { ...state.completedRequests, ...Object.fromEntries(Object.entries(state.requests ?? {}).map(([id, request]) =>
                 [id, { ...request, completedAt: Date.now(), status: 'canceled' as const }])) }
         }));
-        if (subscribe) response = record(await this.client.request('thread/resume', { threadId }));
+        if (subscribe) response = record(await this.client.request('thread/resume', { threadId, excludeTurns: true }));
         this.acceptSettings(response); this.acceptSettings(this.host.settingsFor(threadId) ?? {});
-        await this.projection.history(response.thread); await this.refresh(); await this.refreshChildren(true);
+        const thread = record(response.thread);
+        if (thread.historyMode !== 'paginated') {
+            await this.refresh(); await this.refreshChildren(true); return;
+        }
+        // Establish ownership and the live turn state before notifying the
+        // runner. Full transcript projection is intentionally asynchronous;
+        // user input waits for it so no prompt can overtake native history.
+        const revision = this.turnRevision;
+        this.session.updateAgentState(state => ({ ...state, codexHistorySync: 'syncing' }));
+        const head = await readHistoryHead(this.client, threadId);
+        this.applyHistoryHead(head, revision);
+        this.historySync = this.refresh().then(() => this.refreshChildren(true)).then(() => {
+            if (!this.closed) this.session.updateAgentState(state => ({ ...state, codexHistorySync: null }));
+        }, error => {
+            if (!this.closed) this.session.updateAgentState(state => ({ ...state, codexHistorySync: 'failed' }));
+            throw error;
+        });
+        void this.historySync.catch(error => logger.debug('[Codex shared] initial history sync', error));
     }
     async activate(options: SharedLaunchOptions = {}): Promise<void> {
         // Restored input cannot run before the cold-resume settings are applied.
@@ -238,6 +265,11 @@ export class SharedCodexRoot {
     }
     acceptSettings(value: Record<string, unknown>): void {
         if (typeof value.model !== 'string') return;
+        if (typeof value.modelProvider === 'string' && value.modelProvider) {
+            const modelProvider = value.modelProvider;
+            this.session.updateMetadata(metadata => metadata.codexModelProvider === modelProvider
+                ? metadata : { ...metadata, codexModelProvider: modelProvider });
+        }
         this.settingsRevision++;
         if ('collaborationMode' in value && 'sandboxPolicy' in value) this.settingsNotification = value;
         this.settingsNative = { ...this.settingsNative, ...value };
@@ -273,38 +305,65 @@ export class SharedCodexRoot {
             const name = p.threadName ?? undefined; this.session.updateMetadata(metadata => ({ ...metadata, name }));
         }
         if (method === 'thread/archived') { await this.host.end(this, false); return; }
+        if (method === 'thread/goal/updated' && eventThread === this.threadId) this.publishGoal(p.goal);
+        if (method === 'thread/goal/cleared' && eventThread === this.threadId) this.publishGoal(null);
         if (method === 'thread/queue/changed') await this.queue.reconcile();
         await this.projection.notification(method, params, modelAtReceipt); this.alive();
     }
     async readThread(threadId = this.threadId): Promise<Record<string, unknown>> {
-        let thread = record(record(await this.client.request('thread/read', { threadId, includeTurns: false })).thread);
-        if (thread.historyMode === 'paginated') {
-            const turns: unknown[] = []; let cursor: string | undefined;
-            do {
-                const page = record(await this.client.request('thread/turns/list', { threadId, cursor, sortDirection: 'asc', itemsView: 'full' }));
-                if (!Array.isArray(page.data)) throw new Error('Invalid Codex history');
-                turns.push(...page.data); cursor = string(page.nextCursor);
-            } while (cursor);
-            thread.turns = turns;
-        } else thread = record(record(await this.client.request('thread/read', { threadId, includeTurns: true })).thread);
-        return thread;
+        // A metadata read tells us whether this thread opted into the only
+        // documented paged-history contract.
+        return record(record(await this.client.request('thread/read', { threadId, includeTurns: false })).thread);
+    }
+    private async hydrateHistory(thread: Record<string, unknown>, projection = this.projection): Promise<HistoryTurn | undefined> {
+        const threadId = string(thread.id) ?? this.threadId;
+        if (thread.historyMode !== 'paginated') {
+            const full = record(record(await this.client.request('thread/read', { threadId, includeTurns: true })).thread);
+            await projection.history(full); return Array.isArray(full.turns) ? record(full.turns.at(-1)) : undefined;
+        }
+        projection.beginHistory();
+        try {
+            return await streamThreadHistory(this.client, threadId, async (turn, items) => {
+                await projection.history({ turns: [{ ...turn, items }] });
+            }, () => !this.closed && !this.stopping);
+        } finally { projection.endHistory(); }
     }
     refresh(): Promise<void> {
         return this.refreshing ??= this.refreshNow().finally(() => { this.refreshing = undefined; });
+    }
+    private publishGoal(raw: unknown): void {
+        const parsed = ThreadGoalSchema.nullable().safeParse(raw);
+        if (!parsed.success || parsed.data && parsed.data.threadId !== this.threadId) return;
+        this.goalRevision++;
+        const serialized = JSON.stringify(parsed.data);
+        if (this.publishedGoal === serialized) return;
+        this.publishedGoal = serialized;
+        this.session.updateAgentState(state => ({ ...state, codexGoal: parsed.data }));
+    }
+    private async refreshGoal(): Promise<void> {
+        const revision = this.goalRevision;
+        try {
+            const response = record(await this.client.request('thread/goal/get', { threadId: this.threadId }));
+            if (revision === this.goalRevision) this.publishGoal(response.goal);
+        } catch (error) {
+            // An unsupported/unavailable read does not clear the saved goal or resume it.
+            logger.debug('[Codex shared] goal snapshot unavailable', error);
+        }
     }
     private async refreshNow(): Promise<void> {
         if (!this.threadId || this.closed || !this.client.isInitialized()) return;
         const revision = this.turnRevision;
         const thread = await this.readThread();
-        const turns = Array.isArray(thread.turns) ? thread.turns.map(record) : [];
-        if (revision === this.turnRevision) {
-            this.currentTurn = string(turns.find(turn => turn.status === 'inProgress')?.id);
-            this.interrupted = turns.at(-1)?.status === 'interrupted';
-            const last = turns.at(-1);
-            const id = string(last?.id);
-            this.latestTurn = id && last ? { id, status: string(last.status) ?? 'unknown', planId: planProposalForTurn(this.threadId, last) } : undefined;
-        }
-        await this.projection.history(thread); await this.queue.reconcile(); this.alive();
+        const last = await this.hydrateHistory(thread);
+        this.applyHistoryHead(last, revision);
+        await this.queue.reconcile(); await this.refreshGoal(); this.alive();
+    }
+    private applyHistoryHead(last: HistoryTurn | undefined, revision: number): void {
+        if (revision !== this.turnRevision) return;
+        this.currentTurn = last?.status === 'inProgress' ? string(last.id) : undefined;
+        this.interrupted = last?.status === 'interrupted';
+        const id = string(last?.id);
+        this.latestTurn = id && last ? { id, status: string(last.status) ?? 'unknown', planId: planProposalForTurn(this.threadId, last) } : undefined;
     }
     private async refreshChildren(subscribe: boolean): Promise<void> {
         let cursor: string | undefined;
@@ -329,8 +388,8 @@ export class SharedCodexRoot {
         for (const [id, projection] of this.children) {
             // Replaying a completed/unloaded child must not start its engine.
             try {
-                if (subscribe && loaded.has(id)) await this.client.request('thread/resume', { threadId: id });
-                projection.reset(); await projection.history(await this.readThread(id));
+                if (subscribe && loaded.has(id)) await this.client.request('thread/resume', { threadId: id, excludeTurns: true });
+                projection.reset(); await this.hydrateHistory(await this.readThread(id), projection);
             } catch (error) { logger.debug('[Codex shared] child history unavailable', { id, error }); }
         }
     }
@@ -351,7 +410,7 @@ export class SharedCodexRoot {
                     this.permissions = new SharedCodexPermissions(this.session, this.client, `${this.host.generation}:${randomUUID()}`);
                     this.client.setServerRequestHandler(request => { void this.receiveRequest(request); });
                     const settingsRevision = this.settingsRevision;
-                    const response = record(await this.client.request('thread/resume', { threadId: this.threadId }));
+                    const response = record(await this.client.request('thread/resume', { threadId: this.threadId, excludeTurns: true }));
                     const observedSettings = this.settingsRevision !== settingsRevision;
                     this.acceptSettings(response);
                     if (!observedSettings) this.acceptSettings(this.host.settingsFor(this.threadId) ?? {});
@@ -497,8 +556,7 @@ export class SharedCodexRoot {
     }
     private async assertBoundary(localId: string, turnId: string): Promise<Record<string, unknown>> {
         const thread = await this.readThread();
-        const turn = (Array.isArray(thread.turns) ? thread.turns.map(record) : []).find(turn => turn.id === turnId);
-        const first = (Array.isArray(turn?.items) ? turn.items.map(record) : []).find(item => item.type === 'userMessage');
+        const first = await firstTurnUserMessage(this.client, this.threadId, turnId);
         const firstId = string(first?.clientId ?? first?.clientUserMessageId) ?? (first?.id ? `codex:${this.threadId}:user:${first.id}` : undefined);
         if (firstId !== localId) throw new Error('Cannot cut inside a steered native turn. Select its first message.');
         return thread;
@@ -534,6 +592,7 @@ export class SharedCodexRoot {
             const response = slash.action === 'show' ? await this.client.request('thread/goal/get', params)
                 : slash.action === 'clear' ? await this.client.request('thread/goal/clear', params)
                 : await this.client.request('thread/goal/set', { ...params, ...(slash.action === 'set' ? { objective: slash.objective } : { status: slash.action === 'pause' ? 'paused' : 'active' }) });
+            this.publishGoal(slash.action === 'clear' ? null : record(response).goal);
             this.notice(JSON.stringify(response)); return null;
         }
         if (slash.updates?.proactiveMultiAgent !== undefined) throw new Error('This Codex version uses Ultra reasoning effort instead of a multi-agent toggle');

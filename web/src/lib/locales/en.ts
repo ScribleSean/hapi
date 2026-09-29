@@ -226,6 +226,8 @@ export default {
   // Session inactive
   'session.inactive.autoResume': 'This session is inactive. Send a message to resume.',
   'session.inactive.cannotResume': 'This session is inactive and cannot be resumed.',
+  'session.history.syncing': 'Connected. Syncing native history; new messages will wait until it finishes.',
+  'session.history.failed': 'Native history could not sync. Your message was not sent. Reconnect before retrying.',
   'session.reconnect.connecting': 'Connecting to this session…',
   'session.reconnect.unavailable': 'Unavailable',
   'session.reconnect.retry': 'Retry',

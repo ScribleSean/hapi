@@ -43,6 +43,9 @@ export function SessionStatusPanel({ data }: { data: SessionStatusData }) {
         <details className="group mx-3 mt-3 rounded-md border border-[var(--app-border)] bg-[var(--app-subtle-bg)]">
             <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs font-semibold text-[var(--app-fg)] [&::-webkit-details-marker]:hidden">
                 {t('session.status.title')}
+                {data.goal ? <span className="truncate text-[var(--app-hint)] font-normal">
+                    /goal · {t(`session.status.goal.${data.goal.status}`)}
+                </span> : null}
                 <span className="ml-auto text-[10px] text-[var(--app-hint)] transition-transform group-open:rotate-180" aria-hidden="true">▼</span>
             </summary>
             <div className="grid max-h-[min(50dvh,24rem)] gap-3 overflow-y-auto border-t border-[var(--app-border)] px-3 py-2.5 sm:grid-cols-2">
@@ -52,6 +55,10 @@ export function SessionStatusPanel({ data }: { data: SessionStatusData }) {
                         <div className="mt-0.5 text-xs text-[var(--app-hint)]">
                             {t(`session.status.goal.${data.goal.status}`)}
                             {data.goal.timeUsedSeconds > 0 ? ` · ${formatDuration(data.goal.timeUsedSeconds * 1000)}` : ''}
+                        </div>
+                        <div className="mt-0.5 text-xs text-[var(--app-hint)]">
+                            {data.goal.tokensUsed.toLocaleString()} tokens
+                            {data.goal.tokenBudget != null ? ` / ${data.goal.tokenBudget.toLocaleString()} budget` : ''}
                         </div>
                     </Section>
                 ) : null}

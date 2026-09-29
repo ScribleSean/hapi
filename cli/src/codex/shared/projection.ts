@@ -42,6 +42,8 @@ export class SharedCodexProjection {
     private readonly pendingTitles = new Map<string, string>();
     private readonly completedTitles = new Set<string>();
     private titleRevision = 0;
+    private historyTitleRevision: number | undefined;
+    private historyLatestTitle: string | undefined;
     constructor(private readonly session: ApiSessionClient, readonly threadId: string,
         private readonly committed: (id: string) => Promise<void>, private readonly parentThreadId?: string) {
         if (!parentThreadId) for (const [id, turn] of Object.entries(session.getMetadata()?.conversationHistoryTurns ?? {})) this.turns.set(id, turn);
@@ -49,6 +51,16 @@ export class SharedCodexProjection {
 
     turnFor(id: string): string | undefined { return this.turns.get(id); }
     reset(): void { this.converter = new AppServerEventConverter(); this.emitted.clear(); }
+    beginHistory(): void {
+        this.historyTitleRevision = this.titleRevision;
+        this.historyLatestTitle = undefined;
+    }
+    endHistory(): void {
+        const revision = this.historyTitleRevision;
+        const title = this.historyLatestTitle;
+        this.historyTitleRevision = undefined; this.historyLatestTitle = undefined;
+        if (title && revision === this.titleRevision && !metadataHasDisplayTitle(this.session.getMetadata())) this.applyDisplayRename(title, revision);
+    }
     private send(body: Record<string, unknown>, key: string): void {
         if (this.emitted.has(key)) return;
         this.emitted.add(key);
@@ -210,7 +222,9 @@ export class SharedCodexProjection {
         // Repair sessions created while remote title projection was missing.
         // Recheck inside the metadata lock: live updates may still be queued,
         // and a replay must never replace an existing or newer display title.
-        if (latestTitle && titleRevision === this.titleRevision && !metadataHasDisplayTitle(this.session.getMetadata())) {
+        if (latestTitle && this.historyTitleRevision !== undefined) {
+            this.historyLatestTitle = latestTitle;
+        } else if (latestTitle && titleRevision === this.titleRevision && !metadataHasDisplayTitle(this.session.getMetadata())) {
             const title = latestTitle;
             this.session.updateMetadata(metadata => {
                 if (titleRevision !== this.titleRevision || metadataHasDisplayTitle(metadata)) {
