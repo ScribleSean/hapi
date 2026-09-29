@@ -16,7 +16,11 @@ function countStatus(state: BurnModeState, status: BurnSessionStatus): number {
 
 export function getBurnModeSummary(state: BurnModeState | undefined): string {
     if (!state) return 'Unavailable'
-    if (state.restoring) return `Restoring ${countStatus(state, 'pending')} pending`
+    if (state.restoring) {
+        const restoreProblems = countStatus(state, 'unsupported') + countStatus(state, 'blocked') + countStatus(state, 'failed')
+        if (restoreProblems) return `Restore needs attention: ${restoreProblems}`
+        return `Restoring ${countStatus(state, 'pending')} pending`
+    }
     if (!state.enabled) return 'Off'
     const pending = countStatus(state, 'pending')
     const problems = countStatus(state, 'unsupported') + countStatus(state, 'blocked') + countStatus(state, 'failed')
@@ -35,20 +39,23 @@ export function BurnModeControl(props: { api: ApiClient | null; sessions: Sessio
     const canRetryUpdates = Boolean(state?.sessions.some((session) => session.status === 'failed' || session.status === 'blocked'))
     const isSwitchDisabled = burn.isUpdating || !state
     const switchLabel = state?.enabled ? 'Turn Burn off and restore saved settings' : 'Turn Burn on for supported bots'
+    const statusSummary = burn.readError ? 'Unavailable (stale)' : getBurnModeSummary(state)
 
     return <>
         <div className="flex min-h-11 items-center gap-1 rounded-md px-1 text-xs text-[var(--app-link)]">
             <span className="pl-2 font-medium text-[var(--app-fg)]">Burn</span>
             <button type="button" role="switch" aria-checked={Boolean(state?.enabled)} aria-label={switchLabel} title={switchLabel}
                 disabled={isSwitchDisabled} onClick={() => burn.setEnabled(!state?.enabled)}
-                className="relative h-6 w-11 shrink-0 rounded-full bg-[var(--app-divider)] transition-colors aria-checked:bg-[var(--app-link)] disabled:cursor-not-allowed disabled:opacity-45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]">
+                className="relative flex h-11 w-11 shrink-0 items-center justify-center disabled:cursor-not-allowed disabled:opacity-45 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]">
                 <span className="sr-only">{state?.enabled ? 'On' : 'Off'}</span>
-                <span className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${state?.enabled ? 'translate-x-5' : ''}`} />
+                <span aria-hidden="true" className={`absolute h-6 w-11 rounded-full transition-colors ${state?.enabled ? 'bg-[var(--app-link)]' : 'bg-[var(--app-divider)]'}`} />
+                <span aria-hidden="true" className={`absolute left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${state?.enabled ? 'translate-x-5' : ''}`} />
             </button>
             <button type="button" className="min-h-11 rounded-md px-2 text-left text-xs text-[var(--app-link)] hover:bg-[var(--app-secondary-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                aria-label={`Burn status: ${getBurnModeSummary(state)}. View details`} onClick={() => setDetailsOpen(true)}>
-                {burn.isLoading ? 'Loading…' : getBurnModeSummary(state)}
+                aria-label={`Burn status: ${statusSummary}. View details`} onClick={() => setDetailsOpen(true)}>
+                {burn.isLoading ? 'Loading…' : statusSummary}
             </button>
+            {burn.updateError ? <span role="alert" className="max-w-24 truncate text-xs text-[var(--app-badge-warning-text)]" title={burn.updateError}>Update failed</span> : null}
         </div>
         <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
             <DialogContent className="flex max-h-[85dvh] flex-col gap-0 overflow-hidden p-0">

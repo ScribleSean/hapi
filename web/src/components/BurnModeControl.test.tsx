@@ -41,6 +41,7 @@ describe('BurnModeControl', () => {
         renderControl({ getBurnMode, updateBurnMode, retryBurnMode: vi.fn() } as unknown as ApiClient)
         await screen.findByRole('button', { name: 'Burn status: Off. View details' })
         const toggle = screen.getByRole('switch')
+        expect(toggle).toHaveClass('h-11')
         expect(toggle).toHaveAttribute('aria-checked', 'false')
         fireEvent.click(toggle)
         await waitFor(() => expect(updateBurnMode).toHaveBeenCalledWith(true, 2))
@@ -73,7 +74,7 @@ describe('BurnModeControl', () => {
     it('does not loop a failed read and offers an explicit retry', async () => {
         const getBurnMode = vi.fn().mockRejectedValueOnce(new Error('Hub unavailable')).mockResolvedValue(state())
         renderControl({ getBurnMode, updateBurnMode: vi.fn(), retryBurnMode: vi.fn() } as unknown as ApiClient)
-        await screen.findByText('Unavailable')
+        await screen.findByText(/Unavailable/)
         expect(getBurnMode).toHaveBeenCalledTimes(1)
         fireEvent.click(screen.getByRole('button', { name: /Burn status: Unavailable/i }))
         expect(screen.getByText('Hub unavailable')).toBeInTheDocument()
@@ -91,6 +92,20 @@ describe('BurnModeControl', () => {
         fireEvent.click(toggle)
         await waitFor(() => expect(getBurnMode).toHaveBeenCalledTimes(2))
         await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'true'))
+    })
+
+    it('marks a mutation failure beside the switch while retaining the exact error in details', async () => {
+        renderControl({
+            getBurnMode: vi.fn().mockResolvedValue(state()),
+            updateBurnMode: vi.fn().mockRejectedValue(new Error('Revision is stale')),
+            retryBurnMode: vi.fn(),
+        } as unknown as ApiClient)
+        await screen.findByRole('button', { name: 'Burn status: Off. View details' })
+        fireEvent.click(screen.getByRole('switch'))
+        await screen.findByRole('alert')
+        expect(screen.getByRole('alert')).toHaveTextContent('Update failed')
+        fireEvent.click(screen.getByRole('button', { name: 'Burn status: Off. View details' }))
+        expect(screen.getByText('Revision is stale')).toBeInTheDocument()
     })
 
     it('shares an acknowledged update through the Burn query cache', async () => {
@@ -126,5 +141,11 @@ describe('getBurnModeSummary', () => {
             { sessionId: 'one', status: 'applied', detail: '', previous: null },
             { sessionId: 'two', status: 'unsupported', detail: '', previous: null },
         ] }))).toBe('1 needs attention')
+    })
+
+    it('does not report an unsuccessful restore as merely zero pending', () => {
+        expect(getBurnModeSummary(state({ restoring: true, sessions: [
+            { sessionId: 'one', status: 'failed', detail: '', previous: null },
+        ] }))).toBe('Restore needs attention: 1')
     })
 })
