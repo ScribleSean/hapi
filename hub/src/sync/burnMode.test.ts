@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, mock } from 'bun:test'
 import type { Session } from '@hapi/protocol/types'
 import { Store } from '../store'
-import { BurnModeService } from './burnMode'
+import { BurnModeService, claudeBurnCatalog, codexBurnCatalog, grokBurnCatalog, piBurnCatalog } from './burnMode'
 
 const stores: Store[] = []
 afterEach(() => stores.splice(0).forEach(store => store.close()))
@@ -16,8 +16,8 @@ function session(id: string, namespace: string, active = true, flavor = 'codex')
 
 function fixture(items = [session('one', 'a')]) {
     const store = new Store(':memory:'); stores.push(store)
-    const apply = mock(async (id: string, config: { modelReasoningEffort: string | null, serviceTier: string | null }) => {
-        const target = items.find(item => item.id === id)!; target.modelReasoningEffort = config.modelReasoningEffort; target.serviceTier = config.serviceTier
+    const apply = mock(async (id: string, config: { modelReasoningEffort?: string | null, serviceTier?: string | null, effort?: string | null }) => {
+        const target = items.find(item => item.id === id)!; target.modelReasoningEffort = config.modelReasoningEffort ?? null; target.serviceTier = config.serviceTier ?? null
     })
     const catalog = mock(async () => ({ success: true, models: [{ id: 'm', isDefault: true, supportedReasoningEfforts: ['ultra'], serviceTiers: ['priority'] }] }))
     const service = new BurnModeService(store, {
@@ -30,6 +30,30 @@ function fixture(items = [session('one', 'a')]) {
 }
 
 describe('BurnModeService', () => {
+    it('selects only live-advertised controls and never substitutes a catalog default', () => {
+        const target = session('local', 'a'); target.model = 'heretic-9b:latest'
+        expect(codexBurnCatalog(target, { success: true, models: [{ id: 'cloud-default', isDefault: true, supportedReasoningEfforts: ['ultra'], serviceTiers: ['fast'] }] }).target).toBeUndefined()
+        expect(grokBurnCatalog({ success: true, options: [{ value: 'low' }, { value: 'high' }] }).target?.config).toEqual({ effort: 'high' })
+        const pi = session('pi', 'a', true, 'pi'); pi.model = 'shared'; pi.metadata = { ...pi.metadata!, piSelectedModel: { provider: 'one', modelId: 'shared' } }
+        expect(piBurnCatalog(pi, { success: true, availableModels: [{ provider: 'one', modelId: 'shared', reasoning: true, thinkingLevelMap: { high: 'high', max: 'max' } }] }).target?.config).toEqual({ effort: 'max' })
+        expect(piBurnCatalog(pi, { success: true, availableModels: [{ provider: 'two', modelId: 'shared', reasoning: true, thinkingLevelMap: { max: 'max' } }] }).target).toBeUndefined()
+    })
+
+    it('uses the maintained Claude effort capability without selecting a model or paid tier', () => {
+        expect(claudeBurnCatalog().target).toMatchObject({ config: { effort: 'max' }, controls: { effort: true, modelReasoningEffort: false, serviceTier: false } })
+    })
+
+    it('restores only the generic control it changed, including a null effort baseline', async () => {
+        const target = session('claude', 'a', true, 'claude'); target.effort = null
+        const store = new Store(':memory:'); stores.push(store)
+        const apply = mock(async (_id: string, config: { effort?: string | null }) => { if ('effort' in config) target.effort = config.effort ?? null })
+        const service = new BurnModeService(store, { sessions: () => [target], session: () => target, catalog: async () => claudeBurnCatalog(), apply, ready: () => true })
+        service.set('a', true, 0); await service.flush('a')
+        expect(apply).toHaveBeenCalledWith('claude', { effort: 'max' })
+        service.set('a', false, 1); await service.flush('a')
+        expect(apply).toHaveBeenLastCalledWith('claude', { effort: null })
+    })
+
     it('is disabled by default, CAS isolates namespaces, and captures nullable originals once', async () => {
         const f = fixture([session('one', 'a'), session('two', 'b')])
         expect(f.service.state('a')).toMatchObject({ enabled: false, revision: 0, sessions: [] })
@@ -41,16 +65,16 @@ describe('BurnModeService', () => {
         expect(f.service.set('a', true, 1)?.revision).toBe(1)
     })
 
-    it('restores the exact null baseline and does not call unsupported or offline bots', async () => {
+    it('restores exact baselines and does not call offline bots', async () => {
         const offline = session('offline', 'a', false)
         const unsupported = session('other', 'a', true, 'claude')
         const f = fixture([session('one', 'a'), offline, unsupported])
         f.service.set('a', true, 0)
-        await settle(); expect(f.apply).toHaveBeenCalledTimes(1)
+        await settle(); expect(f.apply).toHaveBeenCalledTimes(2)
         expect(f.service.state('a').sessions.find(item => item.sessionId === 'offline')).toMatchObject({ status: 'pending' })
-        expect(f.service.state('a').sessions.find(item => item.sessionId === 'other')).toMatchObject({ status: 'unsupported' })
+        expect(f.service.state('a').sessions.find(item => item.sessionId === 'other')).toMatchObject({ status: 'applied' })
         f.service.set('a', false, 1)
-        await settle(); expect(f.apply).toHaveBeenLastCalledWith('one', { modelReasoningEffort: null, serviceTier: null })
+        await settle(); expect(f.apply).toHaveBeenCalledWith('one', { modelReasoningEffort: null, serviceTier: null })
     })
 
     it('applies an offline session only after an explicit later reconciliation', async () => {
@@ -90,10 +114,18 @@ describe('BurnModeService', () => {
         expect(f.apply).toHaveBeenCalledWith('ready', { modelReasoningEffort: 'ultra', serviceTier: 'fast' })
     })
 
+    it('reconciles an externally changed applied setting back to the selected maximum', async () => {
+        const target = session('drift', 'a'); const f = fixture([target])
+        f.service.set('a', true, 0); await f.service.flush('a')
+        target.modelReasoningEffort = 'low'; target.serviceTier = 'standard'
+        f.service.schedule('a'); await f.service.flush('a')
+        expect(f.apply).toHaveBeenLastCalledWith('drift', { modelReasoningEffort: 'ultra', serviceTier: 'fast' })
+    })
+
     it('restores after an ambiguous ON failure only once per OFF revision', async () => {
         const target = session('one', 'a'); const f = fixture([target])
         let calls = 0
-        f.apply.mockImplementation(async (_id, config) => { calls++; target.modelReasoningEffort = config.modelReasoningEffort; target.serviceTier = config.serviceTier; if (calls === 1) throw new Error('disconnect after apply') })
+        f.apply.mockImplementation(async (_id, config) => { calls++; target.modelReasoningEffort = config.modelReasoningEffort ?? null; target.serviceTier = config.serviceTier ?? null; if (calls === 1) throw new Error('disconnect after apply') })
         f.service.set('a', true, 0); await f.service.flush('a')
         expect(f.service.state('a').sessions[0]?.status).toBe('failed')
         f.service.set('a', false, 1); await f.service.flush('a')

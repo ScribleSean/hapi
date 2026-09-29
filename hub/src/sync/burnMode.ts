@@ -1,23 +1,73 @@
+import { CLAUDE_EFFORT_LEVELS } from '@hapi/protocol'
 import type { BurnModeState } from '@hapi/protocol/burnMode'
 import type { Session } from '@hapi/protocol/types'
 import type { Store } from '../store'
 
-type Catalog = { success: boolean, models?: Array<{ id: string, isDefault: boolean, supportedReasoningEfforts?: string[], serviceTiers?: string[] }> }
-type Dependencies = { sessions(namespace: string): Session[], session(sessionId: string): Session | undefined, catalog(sessionId: string): Promise<Catalog>, apply(sessionId: string, config: { modelReasoningEffort: string | null, serviceTier: string | null }): Promise<void>, ready?(sessionId: string): boolean }
+export type BurnConfig = { modelReasoningEffort?: string | null, serviceTier?: string | null, effort?: string | null }
+export type BurnControls = { modelReasoningEffort: boolean, serviceTier: boolean, effort: boolean }
+export type BurnTarget = { config: BurnConfig, controls: BurnControls, description: string }
+export type BurnCatalog = { target?: BurnTarget, unavailable?: string }
+type LegacyCodexCatalog = { success: boolean, models?: Array<{ id: string, isDefault: boolean, supportedReasoningEfforts?: string[], serviceTiers?: string[] }> }
+type Dependencies = { sessions(namespace: string): Session[], session(sessionId: string): Session | undefined, catalog(session: Session): Promise<BurnCatalog | LegacyCodexCatalog>, apply(sessionId: string, config: BurnConfig): Promise<void>, ready?(session: Session): boolean }
 const offline = 'Offline. Will check when this bot reconnects.'
-
-function flavorOf(session: Session): string { return session.metadata?.flavor ?? 'claude' }
 function ownsRemote(session: Session): boolean { return !(session.agentState?.controlledByUser && !session.metadata?.capabilities?.concurrentClients) }
-function supportsUltraAndFast(session: Session, catalog: Catalog): boolean {
-    if (!catalog.success) return false
-    const raw = session.model?.trim()
-    const active = raw && raw.toLowerCase() !== 'auto'
-        ? catalog.models?.find(item => item.id.trim().toLowerCase() === raw.toLowerCase())
-        : catalog.models?.find(item => item.isDefault)
-    return Boolean(active?.supportedReasoningEfforts?.some(value => value.toLowerCase() === 'ultra') && active?.serviceTiers?.some(value => /^(fast|priority)$/i.test(value.trim())))
+function fingerprint(session: Session): string {
+    return JSON.stringify([
+        session.namespace,
+        session.active,
+        session.model ?? null,
+        session.metadata?.flavor ?? 'claude',
+        ownsRemote(session),
+        session.metadata?.piSelectedModel ?? null,
+        session.modelReasoningEffort ?? null,
+        session.serviceTier ?? null,
+        session.effort ?? null,
+    ])
 }
-function isBurnConfig(session: Session): boolean { return session.modelReasoningEffort?.toLowerCase() === 'ultra' && /^(fast|priority)$/i.test(session.serviceTier?.trim() ?? '') }
-function fingerprint(session: Session): string { return JSON.stringify([session.namespace, session.active, session.model ?? null, flavorOf(session), ownsRemote(session)]) }
+const ranks = new Map(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'].map((v, i) => [v, i]))
+
+/** Never guess provider-specific labels: only documented ordinal values qualify. */
+export function highestAdvertisedEffort(values: readonly string[] | undefined): string | null {
+    let selected: string | null = null; let rank = -1
+    for (const raw of values ?? []) { const value = raw.trim(); const next = ranks.get(value.toLowerCase()); if (next !== undefined && next > rank) { selected = value; rank = next } }
+    return selected
+}
+export function codexBurnCatalog(session: Session, response: { success: boolean, models?: Array<{ id: string, isDefault: boolean, supportedReasoningEfforts?: string[], serviceTiers?: string[] }> }): BurnCatalog {
+    if (!response.success) return { unavailable: 'Codex capability catalog is unavailable.' }
+    const raw = session.model?.trim()
+    const model = raw && raw.toLowerCase() !== 'auto' ? response.models?.find(item => item.id.trim().toLowerCase() === raw.toLowerCase()) : response.models?.find(item => item.isDefault)
+    if (!model) return { unavailable: 'The current Codex model is not in its live catalog.' }
+    const reasoning = highestAdvertisedEffort(model.supportedReasoningEfforts)
+    const tier = model.serviceTiers?.find(value => value.trim().toLowerCase() === 'fast') ?? model.serviceTiers?.find(value => value.trim().toLowerCase() === 'priority')
+    if (!reasoning && !tier) return { unavailable: 'No supported reasoning or speed control is advertised for this exact Codex model and account.' }
+    return { target: { config: { ...(reasoning ? { modelReasoningEffort: reasoning } : {}), ...(tier ? { serviceTier: 'fast' } : {}) }, controls: { modelReasoningEffort: Boolean(reasoning), serviceTier: Boolean(tier), effort: false }, description: [reasoning && `${reasoning} reasoning`, tier && 'Fast tier'].filter(Boolean).join(' and ') } }
+}
+function normalizeCatalog(session: Session, catalog: BurnCatalog | LegacyCodexCatalog): BurnCatalog {
+    return 'success' in catalog ? codexBurnCatalog(session, catalog) : catalog
+}
+export function piBurnCatalog(session: Session, response: { success: boolean, availableModels?: Array<{ provider: string, modelId: string, reasoning?: boolean, thinkingLevelMap?: Partial<Record<string, string | null>> }> }): BurnCatalog {
+    if (!response.success) return { unavailable: 'Pi capability catalog is unavailable.' }
+    const selected = session.metadata?.piSelectedModel
+    const models = response.availableModels?.filter(model => model.modelId === session.model && (!selected || model.provider === selected.provider)) ?? []
+    const model = models.length === 1 ? models[0] : undefined
+    const effort = model?.reasoning ? highestAdvertisedEffort(Object.entries(model.thinkingLevelMap ?? {}).filter(([, mapped]) => mapped != null).map(([level]) => level)) : null
+    return effort ? { target: { config: { effort }, controls: { modelReasoningEffort: false, serviceTier: false, effort: true }, description: `${effort} thinking` } } : { unavailable: 'No supported Pi thinking level is advertised for this exact model.' }
+}
+export function grokBurnCatalog(response: { success: boolean, options?: Array<{ value: string }> }): BurnCatalog {
+    const effort = response.success ? highestAdvertisedEffort(response.options?.map(option => option.value)) : null
+    return effort ? { target: { config: { effort }, controls: { modelReasoningEffort: false, serviceTier: false, effort: true }, description: `${effort} reasoning` } } : { unavailable: response.success ? 'No ordered Grok reasoning option is advertised for this session.' : 'Grok reasoning options are unavailable.' }
+}
+/** Claude's maintained protocol validator exposes these accepted --effort values.
+ * Unlike provider model catalogs, they are a harness capability and apply without
+ * selecting or changing a model. */
+export function claudeBurnCatalog(): BurnCatalog {
+    const effort = CLAUDE_EFFORT_LEVELS.at(-1)
+    return effort ? { target: { config: { effort }, controls: { modelReasoningEffort: false, serviceTier: false, effort: true }, description: `${effort} effort` } } : { unavailable: 'Claude does not advertise an effort control.' }
+}
+function matches(session: Session, target: BurnTarget): boolean { return (!target.controls.modelReasoningEffort || session.modelReasoningEffort === target.config.modelReasoningEffort) && (!target.controls.serviceTier || session.serviceTier === target.config.serviceTier) && (!target.controls.effort || session.effort === target.config.effort) }
+type Snapshot = NonNullable<ReturnType<Store['burnMode']['snapshotFor']>>
+function restoreConfig(row: Snapshot): BurnConfig { const saved = row.saved!; return { ...(row.controls.modelReasoningEffort ? { modelReasoningEffort: saved.modelReasoningEffort } : {}), ...(row.controls.serviceTier ? { serviceTier: saved.serviceTier } : {}), ...(row.controls.effort ? { effort: saved.effort } : {}) } }
+function restored(session: Session, row: Snapshot): boolean { const saved = row.saved!; return (!row.controls.modelReasoningEffort || session.modelReasoningEffort === saved.modelReasoningEffort) && (!row.controls.serviceTier || session.serviceTier === saved.serviceTier) && (!row.controls.effort || session.effort === saved.effort) }
 
 /** Durable, hub-owned policy. It never resumes a bot or changes its model. */
 export class BurnModeService {
@@ -30,8 +80,7 @@ export class BurnModeService {
     controls(namespace: string, sessionId: string): boolean {
         const state = this.state(namespace)
         const row = state.sessions.find(item => item.sessionId === sessionId)
-        const session = this.deps.session(sessionId)
-        return state.enabled && flavorOf(session ?? ({ metadata: null } as Session)) === 'codex' && row?.status !== 'unsupported'
+        return state.enabled && row?.status !== 'unsupported'
     }
     set(namespace: string, enabled: boolean, expectedRevision: number): BurnModeState | null { const state = this.store.burnMode.updatePolicy(namespace, enabled, expectedRevision); if (state) this.schedule(namespace); return state }
     retry(namespace: string): BurnModeState { this.store.burnMode.retryFailed(namespace); this.schedule(namespace); return this.state(namespace) }
@@ -45,70 +94,59 @@ export class BurnModeService {
             const next = this.reconcile(namespace)
             next.catch(error => console.error('[burn mode] reconciliation failed', error))
             this.tails.set(namespace, next)
-            void next.then(() => {
-                this.running.delete(namespace)
-                if (this.dirty.delete(namespace)) this.schedule(namespace)
-            }, () => {
-                this.running.delete(namespace)
-                if (this.dirty.delete(namespace)) this.schedule(namespace)
-            })
+            void next.then(
+                () => { this.running.delete(namespace); if (this.dirty.delete(namespace)) this.schedule(namespace) },
+                () => { this.running.delete(namespace); if (this.dirty.delete(namespace)) this.schedule(namespace) },
+            )
         })
     }
-
     async flush(namespace: string): Promise<void> { await Promise.resolve(); await (this.tails.get(namespace) ?? Promise.resolve()); await Promise.resolve() }
     reconcilePersisted(): void { for (const namespace of this.store.burnMode.namespacesNeedingReconcile()) this.schedule(namespace) }
+    private currentPolicy(namespace: string, observed: BurnModeState): boolean { const current = this.state(namespace); return current.enabled === observed.enabled && current.revision === observed.revision }
     private async reconcile(namespace: string): Promise<void> {
         const policy = this.state(namespace)
         if (!policy.enabled && !policy.restoring && policy.sessions.length === 0) return
         const sessions = this.deps.sessions(namespace)
-        for (let i = 0; i < sessions.length; i += 4) await Promise.all(sessions.slice(i, i + 4).map(session => this.reconcileSession(namespace, session, policy)))
-        const current = this.state(namespace); if (!current.enabled) { this.store.burnMode.markMissingBaselines(namespace, new Set(sessions.map(session => session.id))); this.store.burnMode.finishRestoreWhenComplete(namespace) }
+        for (let i = 0; i < sessions.length; i += 4) {
+            await Promise.all(sessions.slice(i, i + 4).map(session => this.reconcileSession(namespace, session, policy)))
+        }
+        const current = this.state(namespace)
+        if (!current.enabled) {
+            this.store.burnMode.markMissingBaselines(namespace, new Set(sessions.map(session => session.id)))
+            this.store.burnMode.finishRestoreWhenComplete(namespace)
+        }
     }
-    private currentPolicy(namespace: string, observed: BurnModeState): boolean { const current = this.state(namespace); return current.enabled === observed.enabled && current.revision === observed.revision }
     private async reconcileSession(namespace: string, initial: Session, policy: BurnModeState): Promise<void> {
         if (!this.currentPolicy(namespace, policy)) return this.schedule(namespace)
-        let session = this.deps.session(initial.id) ?? initial
-        let row = this.store.burnMode.snapshotFor(namespace, session.id)
-        const initialFingerprint = fingerprint(session)
+        let session = this.deps.session(initial.id) ?? initial; let row = this.store.burnMode.snapshotFor(namespace, session.id); const before = fingerprint(session)
         if (policy.enabled) {
             if (row?.status === 'failed' && row.attemptRevision === policy.revision) return
             if (!session.active) return this.store.burnMode.ensureStatus(namespace, session.id, session.seq, 'pending', offline)
-            if (flavorOf(session) !== 'codex') return this.store.burnMode.ensureStatus(namespace, session.id, session.seq, 'unsupported', 'Ultra plus Fast is only exposed for capable Codex sessions.')
             if (!ownsRemote(session)) return this.store.burnMode.ensureStatus(namespace, session.id, session.seq, 'blocked', 'Controlled in its terminal. Switch to remote control first.')
-            if (!(this.deps.ready?.(session.id) ?? true)) return this.store.burnMode.ensureStatus(namespace, session.id, session.seq, 'pending', 'Waiting for CLI RPC registration.')
-            if (row?.status === 'applied' && row.fingerprint === fingerprint(session) && isBurnConfig(session)) return
+            if (!(this.deps.ready?.(session) ?? true)) return this.store.burnMode.ensureStatus(namespace, session.id, session.seq, 'pending', 'Waiting for supported CLI RPC registration.')
+            if (row?.status === 'applied' && row.fingerprint === fingerprint(session)) return
             if (row?.status === 'unsupported' && row.fingerprint === fingerprint(session)) return
-            let catalog: Catalog
-            try { catalog = await this.deps.catalog(session.id) } catch (error) { return this.fail(namespace, session.id, policy.revision, error, 'Could not read the live model catalog.') }
-            const fresh = this.deps.session(session.id)
-            if (!fresh || fresh.namespace !== namespace || !this.currentPolicy(namespace, policy) || fingerprint(fresh) !== initialFingerprint) return this.schedule(namespace)
-            session = fresh
-            if (!supportsUltraAndFast(session, catalog)) return this.store.burnMode.ensureStatus(namespace, session.id, session.seq, 'unsupported', 'Ultra and Fast are not both advertised for this exact model and account.', fingerprint(session))
-            // Only a verified, live, eligible bot gets a restoration baseline.
-            this.store.burnMode.captureBaseline(namespace, session.id, session.seq, session.modelReasoningEffort ?? null, session.serviceTier ?? null)
-            if (isBurnConfig(session)) return this.store.burnMode.setResult(namespace, session.id, 'applied', 'Ultra reasoning and Fast tier already active.', 0, fingerprint(session))
+            let catalog: BurnCatalog; try { catalog = normalizeCatalog(session, await this.deps.catalog(session)) } catch (error) { return this.fail(namespace, session.id, policy.revision, error, 'Could not read the live capability catalog.') }
+            const fresh = this.deps.session(session.id); if (!fresh || fresh.namespace !== namespace || !this.currentPolicy(namespace, policy) || fingerprint(fresh) !== before) return this.schedule(namespace); session = fresh
+            if (!catalog.target) return this.store.burnMode.ensureStatus(namespace, session.id, session.seq, 'unsupported', catalog.unavailable ?? 'No supported reasoning or speed control is available.', fingerprint(session))
+            const target = catalog.target; this.store.burnMode.captureBaseline(namespace, session.id, session.seq, { modelReasoningEffort: session.modelReasoningEffort ?? null, serviceTier: session.serviceTier ?? null, effort: session.effort ?? null }, target.controls)
+            if (matches(session, target)) return this.store.burnMode.setResult(namespace, session.id, 'applied', `${target.description} already active.`, 0, fingerprint(session))
             if (!this.currentPolicy(namespace, policy)) return this.schedule(namespace)
-            try { await this.deps.apply(session.id, { modelReasoningEffort: 'ultra', serviceTier: 'fast' }) } catch (error) { return this.fail(namespace, session.id, policy.revision, error, 'Burn settings were not confirmed.') }
-            if (!this.currentPolicy(namespace, policy)) return this.schedule(namespace)
-            this.store.burnMode.setResult(namespace, session.id, 'applied', 'Ultra reasoning and Fast tier confirmed.', 0, fingerprint(session))
-            return
+            try { await this.deps.apply(session.id, target.config) } catch (error) { return this.fail(namespace, session.id, policy.revision, error, 'Burn settings were not confirmed.') }
+            const confirmed = this.deps.session(session.id)
+            if (!confirmed || !this.currentPolicy(namespace, policy)) return this.schedule(namespace)
+            this.store.burnMode.setResult(namespace, session.id, 'applied', `${target.description} confirmed.`, 0, fingerprint(confirmed)); return
         }
         if (!row?.hasBaseline) { if (row && row.status !== 'restored') this.store.burnMode.setResult(namespace, session.id, 'restored', 'No Burn settings were applied.'); return }
-        if (row.status === 'restored') return
-        // An ON failure can be ambiguous: a provider might have applied before disconnecting. A new OFF revision gets one restore attempt.
-        if (row.status === 'failed' && row.attemptRevision === policy.revision) return
+        if (row.status === 'restored' || (row.status === 'failed' && row.attemptRevision === policy.revision)) return
         if (!session.active) return this.store.burnMode.setResult(namespace, session.id, 'pending', 'Offline. Original settings will restore when this bot reconnects.')
-        if (flavorOf(session) !== 'codex') return this.store.burnMode.setResult(namespace, session.id, 'failed', 'Original settings await the original Codex session.', policy.revision)
         if (!ownsRemote(session)) return this.store.burnMode.setResult(namespace, session.id, 'blocked', 'Original settings await remote control.')
-        if (!(this.deps.ready?.(session.id) ?? true)) return this.store.burnMode.setResult(namespace, session.id, 'pending', 'Waiting for CLI RPC registration to restore original settings.')
-        if (session.modelReasoningEffort === row.previous!.modelReasoningEffort && session.serviceTier === row.previous!.serviceTier) return this.store.burnMode.setResult(namespace, session.id, 'restored', 'Original reasoning and tier already active.')
+        if (!(this.deps.ready?.(session) ?? true)) return this.store.burnMode.setResult(namespace, session.id, 'pending', 'Waiting for supported CLI RPC registration to restore original settings.')
+        if (restored(session, row)) return this.store.burnMode.setResult(namespace, session.id, 'restored', 'Original settings already active.')
         if (!this.currentPolicy(namespace, policy)) return this.schedule(namespace)
-        try { await this.deps.apply(session.id, row.previous!) } catch (error) { return this.fail(namespace, session.id, policy.revision, error, 'Original settings were not confirmed.') }
+        try { await this.deps.apply(session.id, restoreConfig(row)) } catch (error) { return this.fail(namespace, session.id, policy.revision, error, 'Original settings were not confirmed.') }
         if (!this.currentPolicy(namespace, policy)) return this.schedule(namespace)
-        this.store.burnMode.setResult(namespace, session.id, 'restored', 'Original reasoning and tier restored.')
+        this.store.burnMode.setResult(namespace, session.id, 'restored', 'Original settings restored.')
     }
     private fail(namespace: string, sessionId: string, revision: number, error: unknown, fallback: string): void { this.store.burnMode.ensureStatus(namespace, sessionId, 0, 'failed', error instanceof Error ? error.message : fallback); this.store.burnMode.setResult(namespace, sessionId, 'failed', error instanceof Error ? error.message : fallback, revision) }
 }
-
-
-
