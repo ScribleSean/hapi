@@ -735,6 +735,9 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
 
         const flavor = sessionResult.session.metadata?.flavor ?? 'claude'
+        if (flavor === 'codex' && engine.isBurnControlled(sessionResult.sessionId, c.get('namespace'))) {
+            return c.json({ error: 'Burn mode controls Codex reasoning and speed for this session. Disable Burn mode first.' }, 409)
+        }
         if (flavor !== 'codex' && flavor !== 'opencode') {
             return c.json({ error: 'Model reasoning effort is only supported for Codex and OpenCode sessions' }, 400)
         }
@@ -805,6 +808,9 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
 
         const flavor = sessionResult.session.metadata?.flavor ?? 'claude'
+        if (flavor === 'codex' && engine.isBurnControlled(sessionResult.sessionId, c.get('namespace'))) {
+            return c.json({ error: 'Burn mode controls Codex reasoning and speed for this session. Disable Burn mode first.' }, 409)
+        }
         if (flavor !== 'codex') {
             return c.json({ error: 'Fast mode is only supported for Codex sessions' }, 400)
         }

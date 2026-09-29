@@ -64,6 +64,8 @@ import {
 } from './rpcGateway'
 import { SessionCache } from './sessionCache'
 import { ingestNotifySummaryFromMessage } from './workGraphNotifyIngest'
+import { BurnModeService } from './burnMode'
+import type { BurnModeState } from '@hapi/protocol/burnMode'
 
 type PiResumeAttempt = NonNullable<NonNullable<Session['metadata']>['piResumeAttempt']>
 type PtyResumeAttempt = NonNullable<NonNullable<Session['metadata']>['ptyResumeAttempt']>
@@ -183,6 +185,7 @@ export class SyncEngine {
     private readonly messageService: MessageService
     private readonly titleSuggestionService: TitleSuggestionService
     private readonly rpcGateway: RpcGateway
+    private readonly burnMode: BurnModeService
     private inactivityTimer: NodeJS.Timeout | null = null
     /** Sessions that emitted `session-ready` (Cursor ACP or validated Pi get_state). */
     private readonly sessionReadyIds = new Set<string>()
@@ -237,6 +240,11 @@ export class SyncEngine {
         )
         this.titleSuggestionService = createTitleSuggestionService(store)
         this.rpcGateway = new RpcGateway(io, rpcRegistry)
+        this.burnMode = new BurnModeService(store, {
+            sessions: namespace => this.sessionCache.getSessionsByNamespace(namespace),
+            catalog: sessionId => this.listCodexModelsForSession(sessionId),
+            apply: (sessionId, config) => this.applySessionConfig(sessionId, config)
+        })
         this.reloadAll()
         this.inactivityTimer = setInterval(() => this.expireInactive(), 5_000)
     }
@@ -271,6 +279,22 @@ export class SyncEngine {
 
     getSessions(): Session[] {
         return this.sessionCache.getSessions()
+    }
+
+    getBurnMode(namespace: string): BurnModeState {
+        return this.burnMode.state(namespace)
+    }
+
+    setBurnMode(namespace: string, enabled: boolean, expectedRevision: number): BurnModeState | null {
+        return this.burnMode.set(namespace, enabled, expectedRevision)
+    }
+
+    retryBurnMode(namespace: string): BurnModeState {
+        return this.burnMode.retry(namespace)
+    }
+
+    isBurnControlled(sessionId: string, namespace: string): boolean {
+        return this.burnMode.controls(namespace, sessionId)
     }
 
     private resolveOnlineMachineForSession(
@@ -543,6 +567,8 @@ export class SyncEngine {
         this.sessionCache.handleSessionAlive(payload)
         this.messageService.replayImmediateQueuedMessages(payload.sid)
         this.triggerDedupIfNeeded(payload.sid)
+        const session = this.sessionCache.getSession(payload.sid)
+        if (session) this.burnMode.schedule(session.namespace)
     }
 
     handleSessionReady(payload: { sid: string; time: number }): void {
@@ -557,6 +583,7 @@ export class SyncEngine {
                 .catch(() => {})
         }
         this.triggerDedupIfNeeded(payload.sid)
+        if (session) this.burnMode.schedule(session.namespace)
     }
 
     clearQueuedThinkingGrace(sessionId: string): void {
