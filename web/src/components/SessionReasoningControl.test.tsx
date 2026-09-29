@@ -17,6 +17,7 @@ function setup() {
         getSession: vi.fn().mockResolvedValue({ session: sessions[0] }),
         getSessionCodexModels: vi.fn().mockResolvedValue({ success: true, models: [{ id: 'm', isDefault: true, supportedReasoningEfforts: ['medium', 'ultra'] }] }),
         setModelReasoningEffort: vi.fn().mockResolvedValue(undefined),
+        setServiceTier: vi.fn().mockResolvedValue(undefined),
     }
     return { methods, api: methods as unknown as ApiClient }
 }
@@ -29,33 +30,45 @@ describe('sidebar reasoning controls', () => {
         const parentClick = vi.fn()
         wrapper(<div onClick={parentClick}><SessionReasoningControl api={api} sessions={[sessions[0]]} /></div>)
         expect(methods.getSession).not.toHaveBeenCalled()
-        fireEvent.click(screen.getByRole('button', { name: 'Reasoning for Alpha' }))
-        await screen.findByRole('combobox', { name: 'Reasoning level' })
+        fireEvent.click(screen.getByRole('button', { name: 'Bot settings for Alpha' }))
+        await screen.findByRole('combobox', { name: 'Requested reasoning level' })
         expect(parentClick).not.toHaveBeenCalled()
-        fireEvent.change(screen.getByRole('combobox'), { target: { value: 'ultra' } })
-        fireEvent.click(screen.getByRole('button', { name: 'Apply to 1 session' }))
+        fireEvent.change(screen.getByRole('combobox', { name: 'Requested reasoning level' }), { target: { value: 'ultra' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Apply to 1 bot' }))
         await waitFor(() => expect(methods.setModelReasoningEffort).toHaveBeenCalledWith('a', 'ultra'))
         expect(await screen.findByText(/1 applied/)).toBeTruthy()
     })
     it('previews offline exclusions, supports exact bulk choices, and reports the results', async () => {
         const { api, methods } = setup()
         wrapper(<SessionReasoningControl api={api} sessions={sessions} bulk />)
-        fireEvent.click(screen.getByRole('button', { name: 'Change reasoning for all sessions' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Bot settings for 2 sessions' }))
         await screen.findByRole('combobox')
         fireEvent.change(screen.getByRole('combobox'), { target: { value: 'ultra' } })
-        expect(screen.getByText('1 can accept Ultra. 1 will be skipped.')).toBeTruthy()
-        fireEvent.click(screen.getByRole('button', { name: 'Apply to 1 session' }))
+        expect(screen.getByText('Requested: Ultra. Supported by 1 of 2 selected bots; 1 will be skipped.')).toBeTruthy()
+        fireEvent.click(screen.getByRole('button', { name: 'Apply to 1 bot' }))
         expect(await screen.findByText(/1 applied.*1 skipped/)).toBeTruthy()
         expect(methods.setModelReasoningEffort).toHaveBeenCalledTimes(1)
     })
     it('honors deselection without mutating any sessions', async () => {
         const { api, methods } = setup()
         wrapper(<SessionReasoningControl api={api} sessions={sessions} bulk />)
-        fireEvent.click(screen.getByRole('button', { name: 'Change reasoning for all sessions' }))
+        fireEvent.click(screen.getByRole('button', { name: 'Bot settings for 2 sessions' }))
         await screen.findByRole('combobox')
-        fireEvent.click(screen.getByRole('button', { name: 'Deselect all' }))
-        expect(screen.getByRole('button', { name: 'Apply to 0 sessions' })).toBeDisabled()
+        fireEvent.click(screen.getByRole('button', { name: 'Deselect filtered' }))
+        expect(screen.getByRole('button', { name: 'Apply to 0 bots' })).toBeDisabled()
         expect(methods.setModelReasoningEffort).not.toHaveBeenCalled()
+    })
+    it('shows Fast only when the native Codex catalog advertises it and reports its write', async () => {
+        const { api, methods } = setup()
+        methods.getSessionCodexModels.mockResolvedValue({ success: true, models: [{ id: 'm', isDefault: true, supportedReasoningEfforts: ['medium'], serviceTiers: ['priority'] }] })
+        wrapper(<SessionReasoningControl api={api} sessions={[sessions[0]]} />)
+        fireEvent.click(screen.getByRole('button', { name: 'Bot settings for Alpha' }))
+        await screen.findByRole('tab', { name: 'Speed' })
+        fireEvent.click(screen.getByRole('tab', { name: 'Speed' }))
+        fireEvent.change(screen.getByRole('combobox', { name: 'Requested speed' }), { target: { value: 'fast' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Apply to 1 bot' }))
+        await waitFor(() => expect(methods.setServiceTier).toHaveBeenCalledWith('a', 'fast'))
+        expect(await screen.findByText(/1 applied/)).toBeTruthy()
     })
 })
 describe('connections overview', () => {
