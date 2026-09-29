@@ -34,6 +34,10 @@ export type SendMessageSettlement = {
 
 type BlockedReason = 'no-api' | 'no-session' | 'pending'
 
+function isNoActiveTurnError(error: string): boolean {
+    return /no active turn|turn (?:has )?ended|not currently active/i.test(error)
+}
+
 /**
  * Information about a send that the underlying mutation rejected.
  *
@@ -217,23 +221,20 @@ export function useSendMessage(
             if (!api) {
                 throw new Error('API unavailable')
             }
-            await api.sendMessage(
+            const response = await api.sendMessage(
                 input.sessionId,
                 input.text,
                 input.localId,
                 input.attachments,
                 input.scheduledAt,
-                'queue',
+                input.deliveryMode,
             )
-            // Save once before requesting steering. Never turn a steering failure
-            // into a failed send: the message is already stored by the hub.
-            if (input.deliveryMode === 'steer' && input.scheduledAt == null) {
-                try {
-                    const result = await api.steerMessage(input.sessionId, input.localId)
-                    if (result.status === 'failed') return result.error ?? 'Steering unavailable'
-                } catch (error) {
-                    return error instanceof Error ? error.message : 'Steering unavailable'
-                }
+            // Modern hubs persist and steer this exact localId in the same POST.
+            // Never issue a second client-side steer: a saved-but-uncertain first
+            // delivery must stay queued for explicit recovery, not be duplicated.
+            const delivery = response?.delivery
+            if (delivery?.status === 'failed' && !isNoActiveTurnError(delivery.error)) {
+                return delivery.error || 'Message saved; steering acknowledgement unavailable. Do not resend.'
             }
             return undefined
         },

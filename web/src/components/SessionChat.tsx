@@ -1798,7 +1798,11 @@ function SessionChatInner(props: SessionChatProps) {
         const deliveryMode = resolveMessageDeliveryMode({
             agentFlavor,
             canSteer: isSteeringSupportedForSession(props.session.metadata)
-                && (agentFlavor === 'pi' ? props.session.thinking : props.session.agentState?.steeringActive === true)
+                && (agentFlavor === 'codex'
+                    ? props.session.thinking
+                    : agentFlavor === 'pi'
+                        ? props.session.thinking
+                        : props.session.agentState?.steeringActive === true)
                 && !controlledByUser,
             // Do not use assistant-ui's broader `isRunning` here: a
             // child-agent run is not the Pi main session's steer target.
@@ -2069,7 +2073,7 @@ function SessionChatInner(props: SessionChatProps) {
                                     updatePendingSchedule(restored)
                                 }}
                                 canSteer={isSteeringSupportedForSession(props.session.metadata)
-                                    && (agentFlavor === 'pi'
+                                    && (agentFlavor === 'codex' || agentFlavor === 'pi'
                                         ? props.session.thinking
                                         : props.session.agentState?.steeringActive === true)
                                     && !controlledByUser}
