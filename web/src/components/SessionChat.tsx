@@ -597,7 +597,9 @@ type SessionChatProps = {
         deliveryMode?: MessageDeliveryMode,
     ) => Promise<SendMessageAcceptance | false>
     resolveSessionIdForUpload?: (sessionId: string) => Promise<string>
-    onUploadSessionResolved?: (sessionId: string) => void
+    /** Opaque route visit identity. A late upload may hand off its draft but must not hijack navigation. */
+    routeEntry?: unknown
+    onUploadSessionResolved?: (sessionId: string, routeEntry?: unknown) => void
     onViewModeChange: (mode: 'tail' | 'history') => void
     onRetryMessage?: (localId: string) => void
     autocompleteSuggestions?: (query: string) => Promise<Suggestion[]>
@@ -1864,7 +1866,7 @@ function SessionChatInner(props: SessionChatProps) {
                     resolvedSessionId,
                     pending,
                     async (targetSessionId) => {
-                        props.onUploadSessionResolved?.(targetSessionId)
+                        props.onUploadSessionResolved?.(targetSessionId, props.routeEntry)
                     },
                 )
             },

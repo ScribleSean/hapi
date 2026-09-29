@@ -35,7 +35,7 @@ export function useSessionAutoConnect(options: Options): {
 
     const retry = useCallback(() => {
         const entry = entryRef.current
-        if (!entry.initialized || !entry.attempted) return
+        if (!entry.initialized) return
         entry.attempted = false
         setStatus(null)
         setRetryToken((token) => token + 1)
@@ -62,7 +62,8 @@ export function useSessionAutoConnect(options: Options): {
 
         entry.initialized = true
         if (!options.eligible) {
-            entry.attempted = true
+            // No resume request happened. Keep this entry eligible for its
+            // single first attempt if its owner comes online later.
             setStatus({ state: 'unavailable', message: options.unavailableMessage })
             return
         }

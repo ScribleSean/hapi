@@ -81,6 +81,8 @@ export type ResolvedSession = {
     sessionId: string
     /** True after an inactive-session resume, even when the hub returns the same id. */
     resumed: boolean
+    /** Opaque route-entry identity captured when resolution began. */
+    routeEntry?: unknown
 }
 
 export type SessionResolution = {
@@ -92,6 +94,7 @@ export type SessionResolution = {
 export type SessionResolvedContext = {
     text: string
     attachments?: AttachmentMetadata[]
+    routeEntry?: unknown
 }
 
 type UseSendMessageOptions = {
@@ -326,7 +329,11 @@ export function useSendMessage(
                     // (including same-id PTY/Pi/Cursor resumes).
                     const resolution = await options.onSessionResolved?.(
                         targetSessionId,
-                        { text, attachments },
+                        {
+                            text,
+                            attachments,
+                            ...(resolved.routeEntry === undefined ? {} : { routeEntry: resolved.routeEntry }),
+                        },
                     )
                     if (resolution?.deferUntilDraftHydrated) {
                         // Target composer still needs to hydrate/re-upload files.

@@ -50,12 +50,13 @@ import { seedMessageWindowFromSession, syncTailMessages } from '@/lib/message-wi
 import { clearDraftsAfterSend } from '@/lib/clearDraftsAfterSend'
 import { transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
 import { getDraftAttachments } from '@/lib/composer-attachment-drafts'
-import { refreshSessionDetailPreservingActive } from '@/lib/session-detail-optimistic'
+import { markSessionConfirmedResumed, refreshSessionDetailPreservingActive } from '@/lib/session-detail-optimistic'
 import { inactiveSessionCanResume, resolveAgentSessionIdFromMetadata, resolveCursorReopenGate } from '@/lib/sessionResume'
 import { initializeSessionLastSeen } from '@/lib/sessionLastSeen'
 import { useSelectedSessionSeen } from '@/hooks/useSelectedSessionSeen'
 import { useSessionBrowserTitle } from '@/hooks/useSessionBrowserTitle'
 import { useSessionAutoConnect } from '@/hooks/useSessionAutoConnect'
+import { useSessionRouteEntry, type SessionRouteEntry } from '@/hooks/useSessionRouteEntry'
 import { clearCodexImportedSession } from '@/lib/codexImportedSessions'
 import { getSupersedingSessionId, prepareFollowSupersedingSession, shouldFollowSupersedingSession } from '@/routes/sessions/followSupersedingSession'
 import { migrateSuppressedSendError } from '@/lib/suppressed-send-error'
@@ -343,6 +344,7 @@ function SessionPage() {
     const queryClient = useQueryClient()
     const { addToast } = useToast()
     const { sessionId } = useParams({ from: '/sessions/$sessionId' })
+    const { entry: routeEntry, isCurrent: isCurrentRouteEntry } = useSessionRouteEntry(sessionId)
     const { outline } = useSearch({ from: '/sessions/$sessionId' })
     const {
         session,
@@ -516,12 +518,13 @@ function SessionPage() {
         resolvedSessionRef.current = null
     }, [session?.id, session?.active])
     const resolveSessionId = useCallback(async (currentSessionId: string) => {
+        const sourceRouteEntry = routeEntry
         if (!api || !session || session.active) {
-            return { sessionId: currentSessionId, resumed: false }
+            return { sessionId: currentSessionId, resumed: false, routeEntry: sourceRouteEntry }
         }
         const cached = resolvedSessionRef.current
         if (cached?.source === currentSessionId) {
-            return { sessionId: await cached.target, resumed: true }
+            return { sessionId: await cached.target, resumed: true, routeEntry: sourceRouteEntry }
         }
         if (!inactiveSessionCanResume(session, messages.length, cursorChatStoreStatus?.onDisk)) {
             throw new ApiError(
@@ -533,7 +536,7 @@ function SessionPage() {
         try {
             const target = api.resumeSession(currentSessionId, { permissionMode: session.permissionMode ?? undefined })
             resolvedSessionRef.current = { source: currentSessionId, target }
-            return { sessionId: await target, resumed: true }
+            return { sessionId: await target, resumed: true, routeEntry: sourceRouteEntry }
         } catch (error) {
             if (resolvedSessionRef.current?.source === currentSessionId) {
                 resolvedSessionRef.current = null
@@ -553,19 +556,27 @@ function SessionPage() {
                     'session_inactive',
                 )
         }
-    }, [api, session, messages.length, cursorChatStoreStatus?.onDisk, t, addToast])
+    }, [api, session, messages.length, cursorChatStoreStatus?.onDisk, t, addToast, routeEntry])
 
-    const handleSessionResolved = useCallback((resolvedSessionId: string) => {
+    const handleSessionResolved = useCallback((resolvedSessionId: string, sourceRouteEntry?: SessionRouteEntry) => {
         if (session) {
             if (resolvedSessionId !== session.id) {
                 retargetSharePendingTransfer(session.id, resolvedSessionId)
                 seedMessageWindowFromSession(session.id, resolvedSessionId)
             }
-            queryClient.setQueryData(queryKeys.session(resolvedSessionId), (previous: { session?: typeof session } | undefined) => ({
-                session: { ...(previous?.session ?? session), id: resolvedSessionId, active: true }
-            }))
+            queryClient.setQueryData(queryKeys.session(resolvedSessionId), (previous: { session?: typeof session } | undefined) => {
+                return {
+                    session: markSessionConfirmedResumed({
+                        ...(previous?.session ?? session),
+                        id: resolvedSessionId,
+                    }),
+                }
+            })
             void queryClient.invalidateQueries({ queryKey: queryKeys.sessions })
         }
+        // The resume itself and its draft/cache handoff are still useful after
+        // leaving the route. Only navigation is route-entry scoped.
+        if (sourceRouteEntry && !isCurrentRouteEntry(sourceRouteEntry)) return
         navigate({
             to: '/sessions/$sessionId',
             params: { sessionId: resolvedSessionId },
@@ -580,7 +591,7 @@ function SessionPage() {
             )
             void syncTailMessages(api, resolvedSessionId).catch(() => {})
         }
-    }, [api, navigate, queryClient, session])
+    }, [api, navigate, queryClient, session, isCurrentRouteEntry])
 
     const owningMachineId = session?.metadata?.machineId?.trim() || null
     const owningMachineOnline = owningMachineId
@@ -666,7 +677,7 @@ function SessionPage() {
             await transferComposerDraftThenNavigate(
                 sessionId,
                 resolvedSessionId,
-                () => handleSessionResolved(resolvedSessionId),
+                () => handleSessionResolved(resolvedSessionId, context.routeEntry as SessionRouteEntry | undefined),
                 [],
                 // assistant-ui clears composer text without awaiting this path;
                 // keep the submitted snapshot so deferred hydration still has it.
@@ -855,7 +866,10 @@ function SessionPage() {
             onCancelLoadMore={cancelLoadMoreMessages}
             onSend={sendMessage}
             resolveSessionIdForUpload={async (id) => (await resolveSessionId(id)).sessionId}
-            onUploadSessionResolved={handleSessionResolved}
+            onUploadSessionResolved={(resolvedSessionId, sourceRouteEntry) => (
+                handleSessionResolved(resolvedSessionId, sourceRouteEntry as SessionRouteEntry | undefined)
+            )}
+            routeEntry={routeEntry}
             onViewModeChange={setViewMode}
             onRetryMessage={retryMessage}
             autocompleteSuggestions={getAutocompleteSuggestions}

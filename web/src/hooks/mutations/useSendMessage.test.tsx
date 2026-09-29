@@ -676,6 +676,26 @@ describe('useSendMessage', () => {
         expect(sendMessage).toHaveBeenCalled()
     })
 
+    it('passes the resolver route entry to the post-resume continuation', async () => {
+        const routeEntry = { sessionId: 'session-original', generation: 1 }
+        const onSessionResolved = vi.fn()
+        const { result } = renderHook(
+            () => useSendMessage(createMockApi(), 'session-original', {
+                resolveSessionId: async () => ({ sessionId: 'session-resolved', resumed: true, routeEntry }),
+                onSessionResolved,
+            }),
+            { wrapper: createWrapper() },
+        )
+
+        await act(async () => { await result.current.sendMessage('preserve route visit') })
+
+        expect(onSessionResolved).toHaveBeenCalledWith('session-resolved', {
+            text: 'preserve route visit',
+            attachments: undefined,
+            routeEntry,
+        })
+    })
+
     it('does not mutate when onSessionResolved defers for draft hydration', async () => {
         const sendMessage = vi.fn(async () => {})
         const api = createMockApi(sendMessage)
