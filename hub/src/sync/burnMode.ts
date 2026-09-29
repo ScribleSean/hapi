@@ -1,4 +1,4 @@
-import type { BurnModeState, BurnSessionStatus } from '@hapi/protocol/burnMode'
+import type { BurnModeState } from '@hapi/protocol/burnMode'
 import type { Session } from '@hapi/protocol/types'
 import type { Store } from '../store'
 
@@ -17,7 +17,6 @@ function supportsUltraAndFast(session: Session, catalog: Catalog): boolean {
     return Boolean(active?.supportedReasoningEfforts?.some(value => value.toLowerCase() === 'ultra') && active?.serviceTiers?.some(value => /^(fast|priority)$/i.test(value.trim())))
 }
 function isBurnConfig(session: Session): boolean { return session.modelReasoningEffort?.toLowerCase() === 'ultra' && /^(fast|priority)$/i.test(session.serviceTier?.trim() ?? '') }
-function sameIdentity(before: Session, after: Session): boolean { return before.active === after.active && before.model === after.model && flavorOf(before) === flavorOf(after) && ownsRemote(before) === ownsRemote(after) }
 function fingerprint(session: Session): string { return JSON.stringify([session.namespace, session.active, session.model ?? null, flavorOf(session), ownsRemote(session)]) }
 
 /** Durable, hub-owned policy. It never resumes a bot or changes its model. */
@@ -59,8 +58,9 @@ export class BurnModeService {
     async flush(namespace: string): Promise<void> { await Promise.resolve(); await (this.tails.get(namespace) ?? Promise.resolve()); await Promise.resolve() }
     reconcilePersisted(): void { for (const namespace of this.store.burnMode.namespacesNeedingReconcile()) this.schedule(namespace) }
     private async reconcile(namespace: string): Promise<void> {
-        const policy = this.state(namespace); const sessions = this.deps.sessions(namespace)
-        if (!policy.enabled && !policy.restoring && sessions.length === 0) return
+        const policy = this.state(namespace)
+        if (!policy.enabled && !policy.restoring && policy.sessions.length === 0) return
+        const sessions = this.deps.sessions(namespace)
         for (let i = 0; i < sessions.length; i += 4) await Promise.all(sessions.slice(i, i + 4).map(session => this.reconcileSession(namespace, session, policy)))
         const current = this.state(namespace); if (!current.enabled) { this.store.burnMode.markMissingBaselines(namespace, new Set(sessions.map(session => session.id))); this.store.burnMode.finishRestoreWhenComplete(namespace) }
     }
