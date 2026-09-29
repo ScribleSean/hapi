@@ -27,7 +27,12 @@ assert os.path.isfile(os.path.join(home, 'settings.json'))
 assert not os.path.islink(os.path.join(home, 'settings.json'))
 print('local_auth=ok stores_distinct=ok local_settings_regular=ok')
 PY
-curl -fsS -o /dev/null -w 'ui_http=%{http_code}\n' --max-time 5 "$url/"
+index_html="$(curl -fsS --max-time 5 "$url/")"
+printf '%s' "$index_html" | grep -q '<!doctype html\|<!DOCTYPE html'
+echo 'ui_http=200'
+asset_path="$(printf '%s' "$index_html" | sed -n 's|.*src="\(/assets/[^"]*\)".*|\1|p' | head -n 1)"
+[ -n "$asset_path" ]
+curl -fsS -o /dev/null -w 'ui_asset_http=%{http_code}\n' --max-time 5 "$url$asset_path"
 uid="$(id -u)"
 printf 'local_hub_pid='
 launchctl print "gui/$uid/com.hapi.mac-local-hub" | awk '/pid =/{print $3; exit}'

@@ -6,11 +6,10 @@ altering the Windows-connected `~/.hapi` or `com.hapi.runner`. It uses
 `--no-relay`, and owns only `com.hapi.mac-local-hub` and
 `com.hapi.mac-local-runner`.
 
-The defaults require the versioned executable at
-`~/.local/share/hapi-runner-releases/20260928/hapi-custom`, the workspace
-`~/Developer`, and matching UI assets at
-`~/.local/share/hapi-mac-local-web/20260928/web/dist`. Override the last path
-with `HAPI_LOCAL_WEB_ROOT` when needed. The installer rejects `~/.hapi`,
+The defaults require the all-in-one executable at
+`~/.local/share/hapi-mac-local-releases/20260928/hapi`, the workspace
+`~/Developer`. Its embedded web bundle serves the local UI without a separate
+static server. The installer rejects `~/.hapi`,
 paths inside it, invalid or conflicting ports, a home-wide workspace, missing
 assets, and a non-executable binary.
 
