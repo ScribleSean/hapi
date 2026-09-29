@@ -61,6 +61,7 @@ import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStat
 import { SessionRowSummary } from '@/components/SessionRowSummary'
 import { SessionReasoningControl } from '@/components/SessionReasoningControl'
 import { SessionConnections } from '@/components/SessionConnections'
+import { BurnModeControl } from '@/components/BurnModeControl'
 import { Spinner } from '@/components/Spinner'
 import { transferComposerDraftThenNavigate } from '@/lib/composer-draft-transfer'
 import { useToast } from '@/lib/toast-context'
@@ -1927,6 +1928,7 @@ export function SessionList(props: {
         <div className="flex min-h-0 w-full flex-1 flex-col">
             <div className="flex shrink-0 flex-wrap px-2">
                 <SessionReasoningControl api={api} sessions={props.sessions} bulk />
+                <BurnModeControl api={api} sessions={props.sessions} />
                 <SessionConnections api={api} sessions={props.sessions} machines={machinesById} machineLabels={machineLabelsById} onSelect={props.onSelect} />
             </div>
             <div className="session-list-scrollbar-offset mx-auto w-full max-w-content shrink-0">

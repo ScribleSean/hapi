@@ -62,6 +62,7 @@ import type {
 } from '@hapi/protocol/apiTypes'
 import type { AgentFlavor, MessageDeliveryMode } from '@hapi/protocol'
 import type { CancelMessageResponse, SteerQueuedMessageResponse } from '@hapi/protocol/schemas'
+import { BurnModeStateSchema, UpdateBurnModeRequestSchema, type BurnModeState } from '@hapi/protocol/burnMode'
 import type { TranscriptionMode, TranscriptionProvider, TranscriptionProviderInfo } from '@hapi/protocol/voice'
 
 export type RetryIndeterminateMessageResponse =
@@ -773,6 +774,24 @@ export class ApiClient {
 
     async getHubSettings(): Promise<HubSettingsResponse> {
         return await this.request<HubSettingsResponse>('/api/hub-settings')
+    }
+
+    async getBurnMode(): Promise<BurnModeState> {
+        return BurnModeStateSchema.parse(await this.request<unknown>('/api/burn-mode'))
+    }
+
+    async updateBurnMode(enabled: boolean, expectedRevision: number): Promise<BurnModeState> {
+        const payload = UpdateBurnModeRequestSchema.parse({ enabled, expectedRevision })
+        return BurnModeStateSchema.parse(await this.request<unknown>('/api/burn-mode', {
+            method: 'PUT',
+            body: JSON.stringify(payload)
+        }))
+    }
+
+    async retryBurnMode(): Promise<BurnModeState> {
+        return BurnModeStateSchema.parse(await this.request<unknown>('/api/burn-mode/retry', {
+            method: 'POST'
+        }))
     }
 
     async updateHubSettings(settings: UpdateHubSettingsRequest): Promise<HubSettingsResponse> {
