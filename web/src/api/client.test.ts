@@ -359,3 +359,38 @@ describe('ApiClient Kimi session model discovery', () => {
         expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/sessions/session%2F1/kimi-models')
     })
 })
+
+describe('ApiClient Burn mode', () => {
+    let originalFetch: typeof globalThis.fetch
+    let fetchMock: ReturnType<typeof vi.fn>
+
+    beforeEach(() => {
+        originalFetch = globalThis.fetch
+        fetchMock = vi.fn()
+        globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch
+    })
+
+    afterEach(() => {
+        globalThis.fetch = originalFetch
+    })
+
+    it('validates and sends the hub-owned Burn mode contract', async () => {
+        const current = { enabled: false, revision: 4, updatedAt: 10, restoring: false, sessions: [] }
+        const updated = { ...current, enabled: true, revision: 5 }
+        fetchMock
+            .mockResolvedValueOnce(new Response(JSON.stringify(current), { status: 200 }))
+            .mockResolvedValueOnce(new Response(JSON.stringify(updated), { status: 200 }))
+            .mockResolvedValueOnce(new Response(JSON.stringify(updated), { status: 200 }))
+        const api = new ApiClient('test-token')
+
+        await expect(api.getBurnMode()).resolves.toEqual(current)
+        await expect(api.updateBurnMode(true, 4)).resolves.toEqual(updated)
+        await expect(api.retryBurnMode()).resolves.toEqual(updated)
+
+        expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/burn-mode')
+        expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/burn-mode')
+        expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({ method: 'PUT', body: JSON.stringify({ enabled: true, expectedRevision: 4 }) })
+        expect(fetchMock.mock.calls[2]?.[0]).toBe('/api/burn-mode/retry')
+        expect(fetchMock.mock.calls[2]?.[1]).toMatchObject({ method: 'POST' })
+    })
+})

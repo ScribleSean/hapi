@@ -85,6 +85,15 @@ const multiMachineSessions = [
     })
 ]
 
+describe('SessionList header controls', () => {
+    it('keeps Models & connections available beside the Burn status control', () => {
+        renderSessionList([makeSession({ id: 'session-1', metadata: { path: '/work/hapi' } })])
+
+        expect(screen.getByRole('button', { name: 'Burn status: Unavailable. View details' })).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Models & connections' })).toBeInTheDocument()
+    })
+})
+
 describe('SessionList machine filter', () => {
     beforeEach(() => {
         window.localStorage.clear()
