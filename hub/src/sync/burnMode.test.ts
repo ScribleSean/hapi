@@ -39,6 +39,14 @@ describe('BurnModeService', () => {
         expect(piBurnCatalog(pi, { success: true, availableModels: [{ provider: 'two', modelId: 'shared', reasoning: true, thinkingLevelMap: { max: 'max' } }] }).target).toBeUndefined()
     })
 
+    it('uses an Auto catalog default only for the native OpenAI provider', () => {
+        const auto = session('auto', 'a'); auto.model = 'auto'; auto.metadata = { ...auto.metadata!, codexModelProvider: 'openai' }
+        const response = { success: true, models: [{ id: 'cloud-default', isDefault: true, supportedReasoningEfforts: ['ultra'], serviceTiers: ['priority'] }] }
+        expect(codexBurnCatalog(auto, response).target?.config).toEqual({ modelReasoningEffort: 'ultra', serviceTier: 'fast' })
+        auto.metadata = { ...auto.metadata!, codexModelProvider: 'ollama' }
+        expect(codexBurnCatalog(auto, response).target).toBeUndefined()
+    })
+
     it('uses the maintained Claude effort capability without selecting a model or paid tier', () => {
         expect(claudeBurnCatalog().target).toMatchObject({ config: { effort: 'max' }, controls: { effort: true, modelReasoningEffort: false, serviceTier: false } })
     })
@@ -120,6 +128,36 @@ describe('BurnModeService', () => {
         target.modelReasoningEffort = 'low'; target.serviceTier = 'standard'
         f.service.schedule('a'); await f.service.flush('a')
         expect(f.apply).toHaveBeenLastCalledWith('drift', { modelReasoningEffort: 'ultra', serviceTier: 'fast' })
+    })
+
+    it('fails closed when an apply acknowledgement does not update the observed settings', async () => {
+        const target = session('unconfirmed', 'a')
+        const store = new Store(':memory:'); stores.push(store)
+        const service = new BurnModeService(store, {
+            sessions: () => [target], session: () => target,
+            catalog: async () => ({ success: true, models: [{ id: 'm', isDefault: true, supportedReasoningEfforts: ['ultra'], serviceTiers: ['fast'] }] }),
+            apply: async () => {}, ready: () => true,
+        })
+        service.set('a', true, 0); await service.flush('a')
+        expect(service.state('a').sessions[0]).toMatchObject({ status: 'failed', previous: { modelReasoningEffort: null, serviceTier: null } })
+        expect(service.state('a').sessions[0]?.detail).toContain('observed')
+    })
+
+    it('fails closed when a restore acknowledgement leaves the Burn value in place', async () => {
+        const target = session('restore-unconfirmed', 'a')
+        const store = new Store(':memory:'); stores.push(store); let calls = 0
+        const service = new BurnModeService(store, {
+            sessions: () => [target], session: () => target,
+            catalog: async () => ({ success: true, models: [{ id: 'm', isDefault: true, supportedReasoningEfforts: ['ultra'], serviceTiers: ['fast'] }] }),
+            apply: async (_id, config) => {
+                calls++
+                if (calls === 1) { target.modelReasoningEffort = config.modelReasoningEffort ?? null; target.serviceTier = config.serviceTier ?? null }
+            }, ready: () => true,
+        })
+        service.set('a', true, 0); await service.flush('a')
+        service.set('a', false, 1); await service.flush('a')
+        expect(service.state('a').sessions[0]).toMatchObject({ status: 'failed', previous: { modelReasoningEffort: null, serviceTier: null } })
+        expect(service.state('a').sessions[0]?.detail).toContain('observed')
     })
 
     it('restores after an ambiguous ON failure only once per OFF revision', async () => {
