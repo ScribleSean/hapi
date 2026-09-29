@@ -1,5 +1,7 @@
 # Reliability repair, September 28, 2026
 
+September 29 continuation: [Burn mode and rollout evidence](burn-mode.md) records the shared toggle, exact restoration, file/folder-link integration and accepted Windows/Mac-local deployment. Mac launcher activation is now accepted after the earlier rollback described below. Loaded native wrappers still require their own safe idle adoption; no fleet-wide steering acceptance is implied.
+
 This branch keeps existing shared native Codex thread identities while improving cold resume and bot controls. It excludes the unfinished experimental task/model picker in the separate development checkout.
 
 ## Behavior
