@@ -242,10 +242,12 @@ export class SyncEngine {
         this.rpcGateway = new RpcGateway(io, rpcRegistry)
         this.burnMode = new BurnModeService(store, {
             sessions: namespace => this.sessionCache.getSessionsByNamespace(namespace),
+            session: sessionId => this.sessionCache.getSession(sessionId),
             catalog: sessionId => this.listCodexModelsForSession(sessionId),
             apply: (sessionId, config) => this.applySessionConfig(sessionId, config)
         })
         this.reloadAll()
+        this.burnMode.reconcilePersisted()
         this.inactivityTimer = setInterval(() => this.expireInactive(), 5_000)
     }
 
@@ -473,7 +475,7 @@ export class SyncEngine {
             // MUST snapshot the metadata reference BEFORE calling it.
             // Reading `before?.metadata` after the mutation would see the
             // new value and `hasSameAgentSessionIds` would always return
-            // true — breaking the dedup-on-metadata-id-change trigger that
+            // true â€” breaking the dedup-on-metadata-id-change trigger that
             // the legacy `refreshSession` path got for free (refresh
             // REPLACES the cache entry, leaving the old object reference
             // intact for the caller). Use the snapshot for BOTH branches
@@ -530,7 +532,7 @@ export class SyncEngine {
         this.eventPublisher.emit(event)
 
         if (event.type === 'message-received' && event.sessionId && 'message' in event && event.message) {
-            // A2A P3: well-formed AGENT_NOTIFY_SUMMARY → work-graph work_ad.
+            // A2A P3: well-formed AGENT_NOTIFY_SUMMARY â†’ work-graph work_ad.
             // Capture is independent of chat display settings (#1462/#1464).
             const session = this.getSession(event.sessionId)
             if (session) {
@@ -614,7 +616,7 @@ export class SyncEngine {
             sessionId: payload.sid,
             reason: payload.reason
         })
-        // Retry dedup now that this session is inactive — a prior dedup may have
+        // Retry dedup now that this session is inactive â€” a prior dedup may have
         // skipped it because it was still active at the time. Cursor ACP rows that
         // never reached session-ready must not dedup-merge the original on failure.
         if (shouldRetryDedup) {
@@ -727,7 +729,7 @@ export class SyncEngine {
      * `outcome: 'duplicate'` covers the migration path's idempotency:
      * the web client may retry pushing a localStorage entry after a
      * partial failure; the second attempt should be a no-op rather than
-     * a hard error. Route layer maps duplicate → 200/conflict per its
+     * a hard error. Route layer maps duplicate â†’ 200/conflict per its
      * own contract; this layer just reports it.
      */
     createScratchlistEntry(
@@ -942,7 +944,7 @@ export class SyncEngine {
 
     /**
      * Manual stop-runner for supervised hosts only (banner Restart).
-     * Detached `hapi runner start` has no supervisor — stop would leave the
+     * Detached `hapi runner start` has no supervisor â€” stop would leave the
      * host offline. Require `metadata.supervisedRestart` (HAPI_RUNNER_SUPERVISED=1).
      */
     async restartMachineRunner(machineId: string, namespace: string): Promise<
@@ -1138,7 +1140,7 @@ export class SyncEngine {
         if (!localId) {
             return { status: 'failed', error: 'Message has no localId', localId: null }
         }
-        // Reject every scheduled row — mature ones included. A matured row is
+        // Reject every scheduled row â€” mature ones included. A matured row is
         // released by the scheduled-FIFO path moments later anyway, and the web
         // never offers Steer on scheduled rows.
         if (scheduledAt != null) {
@@ -1581,7 +1583,7 @@ export class SyncEngine {
 
             // Claude fork is spawn+flag, not an RPC-time snapshot. Keep the
             // source history lock (caller holds historyActionsInFlight) until
-            // the child binds a distinct native id — otherwise the source can
+            // the child binds a distinct native id â€” otherwise the source can
             // advance before --fork-session materializes.
             if (flavor === 'claude' && rpcResult.forkSession === true) {
                 const bound = await this.waitForClaudeForkBound(childId, rpcResult.nativeSessionId)
@@ -1785,14 +1787,14 @@ export class SyncEngine {
             // `cursorMigrationState='in_progress'` flag in the SAME metadata
             // write that flips `cursorSessionProtocol` to 'acp'. The web
             // banner keys off `cursorMigrationState`, so a single SSE
-            // session-updated event swaps both atomically — banner gone,
-            // protocol flipped — preventing a flicker window where the
+            // session-updated event swaps both atomically â€” banner gone,
+            // protocol flipped â€” preventing a flicker window where the
             // banner has already disappeared but the chat hasn't re-rendered
             // to the ACP transport yet.
             const carriedMigrationState = latest.metadata.cursorMigrationState
             // Atomic active-check inside the same synchronous flip op so
             // that a resume cannot land between the migrator's recheck
-            // and the actual DB update. Bun is single-threaded — once
+            // and the actual DB update. Bun is single-threaded â€” once
             // we've read `latest` and the row is inactive, no other JS
             // can mutate active=true until this method returns. Codex
             // review #34 P1 v2: the migrator's recheck is best-effort;
@@ -1802,7 +1804,7 @@ export class SyncEngine {
             // NOT on lifecycleState === 'running'. After a force-archive
             // flow archiveSession() synchronously sets active=false but
             // the cleanup metadata write that flips lifecycleState
-            // 'running' → 'archived' may still be in-flight, and that
+            // 'running' â†’ 'archived' may still be in-flight, and that
             // is OUR archive completing, not a resume race. The active
             // flag is the authoritative live-runner signal.
             if (latest.active === true) {
@@ -1883,7 +1885,7 @@ export class SyncEngine {
             archiveSession: async (sessionId) => {
                 await this.archiveSession(sessionId)
             },
-            // NOTE: no awaitSessionInactive injection — handleSessionEnd()
+            // NOTE: no awaitSessionInactive injection â€” handleSessionEnd()
             // synchronously sets cache.active=false inside archiveSession,
             // so any cache-based poll would return immediately and provide
             // false reassurance. The migrator now relies on
@@ -2005,7 +2007,7 @@ export class SyncEngine {
         const session = this.sessionCache.getSession(sessionId)
         if (!session?.active) {
             // For inactive sessions, update the in-memory cache directly without
-            // an RPC call — the CLI is not running yet. The updated value will be
+            // an RPC call â€” the CLI is not running yet. The updated value will be
             // passed to the spawned process when the session is resumed.
             this.sessionCache.applySessionConfig(sessionId, config)
             return
@@ -2626,7 +2628,7 @@ export class SyncEngine {
     }
 
     /**
-     * tiann/hapi#824 — sync-on-open auto-migration. Returns the (possibly
+     * tiann/hapi#824 â€” sync-on-open auto-migration. Returns the (possibly
      * refreshed-from-cache) session. If the session is a legacy stream-json
      * Cursor session AND the env flag is on, attempts a transplant migration
      * synchronously before the caller spawns the runner.
@@ -2637,10 +2639,10 @@ export class SyncEngine {
      * processes coexist on the same host without conflict, and swear01's
      * tiann/hapi#835 refactors the agent-acp-active lock into a cross-process
      * refcount that explicitly supports this. We rely on #835 landing before
-     * this PR — see manifest layer ordering and the dependency note in
+     * this PR â€” see manifest layer ordering and the dependency note in
      * PR #34's body.
      *
-     * Failure modes are all soft — the session is returned unchanged and the
+     * Failure modes are all soft â€” the session is returned unchanged and the
      * caller proceeds with the legacy launcher.
      */
     private async maybeAutoMigrateLegacyCursorSession(session: Session, namespace: string): Promise<Session> {
@@ -2679,7 +2681,7 @@ export class SyncEngine {
         // render the banner. The flag is cleared on success by the same
         // metadata write that flips cursorSessionProtocol to 'acp' (see
         // flipCursorSessionProtocolToAcp) so the banner disappears in the
-        // same render tick the chat re-renders as ACP — no flicker. On
+        // same render tick the chat re-renders as ACP â€” no flicker. On
         // failure we clear the flag explicitly in the catch path below.
         const flagSet = this.setCursorMigrationStateInProgress(session.id, namespace)
         let bannerCleanupNeeded = flagSet
@@ -2694,7 +2696,7 @@ export class SyncEngine {
             // early-return above), so we know there's no runner to yank;
             // the `running` lifecycle is stale metadata, not a live agent.
             // This is exactly the stale-row case the sync-on-open path is
-            // meant to clean up — refusing here would defeat the whole
+            // meant to clean up â€” refusing here would defeat the whole
             // point and silently fall back to the legacy launcher forever.
             const outcome = await migrator.migrateOne(session, { forceArchiveRunning: true })
             if (outcome.ok) {
@@ -2749,7 +2751,7 @@ export class SyncEngine {
                 }
                 return session
             }
-            // Soft fail — log and let the legacy launcher handle it.
+            // Soft fail â€” log and let the legacy launcher handle it.
             console.info('[auto-migrate] legacy cursor session left as stream-json', {
                 sessionId: session.id,
                 reason: outcome.reason,
@@ -2807,7 +2809,7 @@ export class SyncEngine {
      * Set `metadata.cursorMigrationState='in_progress'` on the session row
      * with a single retry on version-mismatch. Returns true if the flag was
      * persisted (so the caller knows the finally-cleanup is required), false
-     * if the write failed entirely — in which case the banner never appeared
+     * if the write failed entirely â€” in which case the banner never appeared
      * and there's nothing to clean up. UX A++ helper for the auto-migrate
      * banner; see maybeAutoMigrateLegacyCursorSession.
      */
@@ -2985,12 +2987,12 @@ export class SyncEngine {
             return { type: 'success', sessionId: access.sessionId }
         }
 
-        // tiann/hapi#824 — invisible, automatic, per-session ACP migration on
+        // tiann/hapi#824 â€” invisible, automatic, per-session ACP migration on
         // first open. If this is a legacy stream-json Cursor session and we
         // can safely migrate it right now (no other agent acp transport
         // would block the post-migration ACP launcher), run the transplant
         // synchronously before resuming. The user sees the regular session
-        // loading state for ~3–5s longer; the session opens as ACP.
+        // loading state for ~3â€“5s longer; the session opens as ACP.
         const session = await this.maybeAutoMigrateLegacyCursorSession(initialSession, namespace)
 
         const targetResult = this.resolveLocalResumeTarget(access.sessionId, namespace)
@@ -3453,7 +3455,7 @@ export class SyncEngine {
             // Pi and PTY resumes both reuse the original HAPI row. Keep the archive
             // snapshot persisted until the CLI successfully bootstraps that row as
             // running; this avoids an inactive, non-archived gap if the Hub restarts
-            // before spawn — the in-memory snapshot below cannot survive that, and
+            // before spawn â€” the in-memory snapshot below cannot survive that, and
             // ptyResumeAttempt carries no copy of it. The CLI's sessionFactory
             // re-stamps lifecycleState='running' on boot and does not carry over
             // archivedBy/archiveReason, so the row still leaves the archived state.
@@ -4137,7 +4139,7 @@ export class SyncEngine {
         return await this.rpcGateway.listKimiModelsForSession(sessionId)
     }
 
-    /** Generic Pi RPC — delegates to rpcGateway.callPiRpc. */
+    /** Generic Pi RPC â€” delegates to rpcGateway.callPiRpc. */
     async callPiRpc<T = unknown>(sessionId: string, method: string, params?: Record<string, unknown>, timeoutMs?: number): Promise<T> {
         return await this.rpcGateway.callPiRpc<T>(sessionId, method, params, timeoutMs)
     }

@@ -78,7 +78,7 @@ export class Store {
 
     /**
      * Filesystem path of the underlying SQLite database, or ':memory:' for
-     * in-memory stores. Used by the legacy → ACP migrator (#824) to take a
+     * in-memory stores. Used by the legacy â†’ ACP migrator (#824) to take a
      * backup before a bulk run; treat as read-only.
      */
     get dbPath(): string {
@@ -146,11 +146,14 @@ export class Store {
             CREATE TABLE IF NOT EXISTS burn_mode_session (
                 namespace TEXT NOT NULL, session_id TEXT NOT NULL, generation INTEGER NOT NULL,
                 previous_reasoning TEXT NULL, previous_tier TEXT NULL, status TEXT NOT NULL,
-                detail TEXT NOT NULL, PRIMARY KEY(namespace, session_id)
+                detail TEXT NOT NULL, has_baseline INTEGER NOT NULL DEFAULT 0,
+                attempt_revision INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(namespace, session_id)
             );
         `)
+        const columns = this.db.query('PRAGMA table_info(burn_mode_session)').all() as Array<{ name: string }>
+        if (!columns.some(column => column.name === 'has_baseline')) this.db.exec('ALTER TABLE burn_mode_session ADD COLUMN has_baseline INTEGER NOT NULL DEFAULT 0')
+        if (!columns.some(column => column.name === 'attempt_revision')) this.db.exec('ALTER TABLE burn_mode_session ADD COLUMN attempt_revision INTEGER NOT NULL DEFAULT 0')
     }
-
     /**
      * Atomically records a CLI prompt-consumption acknowledgement and returns
      * the persisted session activity timestamp. A duplicate or sibling-stamped
@@ -343,7 +346,7 @@ export class Store {
         const currentVersion = this.getUserVersion()
         // V1/V2/V3 entries cover legacy DBs that pre-date our migration ladder.
         // Each step is idempotent (column-existence guards inside) so we can
-        // safely run the full V1→V8 chain in the legacy branch where the DB
+        // safely run the full V1â†’V8 chain in the legacy branch where the DB
         // shape is unknown.
         const buildStepMigrations = (legacy: boolean): Record<number, () => void> => ({
             1: () => this.migrateFromV1ToV2(legacy),
@@ -651,7 +654,7 @@ export class Store {
     private migrateFromV1ToV2(legacy: boolean = false): void {
         const columns = this.getMachineColumnNames()
         if (columns.size === 0) {
-            // In the legacy branch the table may not exist yet — createSchema
+            // In the legacy branch the table may not exist yet â€” createSchema
             // will build the up-to-date one.  When invoked from the regular
             // upgrade path (user_version >= 1), missing the machines table is
             // still an error.
@@ -729,7 +732,7 @@ export class Store {
     private migrateFromV3ToV4(): void {
         const columns = this.getSessionColumnNames()
         // When the legacy branch invokes the full step ladder, an upstream-only
-        // DB may not have the sessions table yet — createSchema runs after the
+        // DB may not have the sessions table yet â€” createSchema runs after the
         // ladder.  Skip ALTERs in that case; createSchema will build the table
         // with the up-to-date columns.
         if (columns.size === 0) return
@@ -768,7 +771,7 @@ export class Store {
     private migrateFromV7ToV8(): void {
         const columns = this.getMessageColumnNames()
         if (columns.size === 0) {
-            // No messages table yet — createSchema will build the up-to-date one.
+            // No messages table yet â€” createSchema will build the up-to-date one.
             return
         }
         if (!columns.has('invoked_at')) {
@@ -777,7 +780,7 @@ export class Store {
         // Idempotent (WHERE invoked_at IS NULL); safe to re-run if a previous attempt
         // crashed between ALTER and UPDATE before user_version was bumped.
         this.db.exec('UPDATE messages SET invoked_at = created_at WHERE invoked_at IS NULL')
-        // Position index for byPosition pagination — idempotent via IF NOT EXISTS.
+        // Position index for byPosition pagination â€” idempotent via IF NOT EXISTS.
         this.db.exec(`
             CREATE INDEX IF NOT EXISTS idx_messages_session_position
                 ON messages(session_id, COALESCE(invoked_at, created_at) DESC, seq DESC)
@@ -787,7 +790,7 @@ export class Store {
     private migrateFromV8ToV9(): void {
         const columns = this.getMessageColumnNames()
         if (columns.size === 0) {
-            // No messages table yet — createSchema will build the up-to-date one.
+            // No messages table yet â€” createSchema will build the up-to-date one.
             return
         }
         if (!columns.has('scheduled_at')) {
@@ -829,8 +832,8 @@ export class Store {
 
     /**
      * tiann/hapi#893 (scratchlist v2): introduce the per-session
-     * `session_scratchlist` typed table. Upstream main took V10→V11 for
-     * `fcm_devices`; scratchlist is V11→V12.
+     * `session_scratchlist` typed table. Upstream main took V10â†’V11 for
+     * `fcm_devices`; scratchlist is V11â†’V12.
      *
      * Idempotent via `CREATE TABLE IF NOT EXISTS` + `CREATE INDEX IF NOT
      * EXISTS`. Cascade-delete from `sessions(id)` handles delete-session
@@ -877,8 +880,8 @@ export class Store {
     /**
      * tiann/hapi#921 (scratchlist v2.2): attachment metadata JSON column.
      * Bytes live on hub filesystem under HAPI_HOME/scratchlist-attachments/.
-     * Upstream ladder: V11→V12 = session_scratchlist (#896); V12–V14 =
-     * message_epochs reconciliation; this step is V14→V15 for attachments.
+     * Upstream ladder: V11â†’V12 = session_scratchlist (#896); V12â€“V14 =
+     * message_epochs reconciliation; this step is V14â†’V15 for attachments.
      *
      * Rollback: `ALTER TABLE session_scratchlist DROP COLUMN attachments` is
      * unsupported on older SQLite; rebuild DB or leave column unused.
@@ -997,7 +1000,7 @@ export class Store {
         }
     }
 
-    /** v23→v24: add the iOS push envelope key. */
+    /** v23â†’v24: add the iOS push envelope key. */
     private migrateFromV23ToV24(): void {
         const fcmColumns = this.db.prepare('PRAGMA table_info(fcm_devices)').all() as Array<{ name: string }>
         if (fcmColumns.length > 0 && !fcmColumns.some((column) => column.name === 'push_key')) {
@@ -1005,7 +1008,7 @@ export class Store {
         }
     }
 
-    /** v24→v25: add durable unknown-delivery state for steers. */
+    /** v24â†’v25: add durable unknown-delivery state for steers. */
     private migrateFromV24ToV25(): void {
         const messageColumns = this.getMessageColumnNames()
         if (messageColumns.size > 0 && !messageColumns.has('delivery_state')) {
@@ -1013,7 +1016,7 @@ export class Store {
         }
     }
 
-    /** v25→v26: make empty immediate-queue heartbeat replay an indexed lookup. */
+    /** v25â†’v26: make empty immediate-queue heartbeat replay an indexed lookup. */
     private migrateFromV25ToV26(): void {
         this.db.exec(`
             CREATE INDEX IF NOT EXISTS idx_messages_immediate_queued
@@ -1044,7 +1047,7 @@ export class Store {
     /**
      * A2A Layer 1 / P1 (#1374) + P3 substrate: hub work-graph ledger tables.
      * Namespace + principal_json required on every events row.
-     * Bumped as v22→v23 because upstream main already ships schema 22.
+     * Bumped as v22â†’v23 because upstream main already ships schema 22.
      */
     private migrateFromV22ToV23(): void {
         this.db.exec(`
