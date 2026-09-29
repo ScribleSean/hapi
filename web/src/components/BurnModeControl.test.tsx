@@ -65,19 +65,37 @@ describe('BurnModeControl', () => {
         renderControl({ getBurnMode, updateBurnMode: vi.fn(), retryBurnMode: vi.fn() } as unknown as ApiClient)
         const toggle = await screen.findByRole('switch', { name: /Turn Burn off/i })
         expect(toggle).toHaveClass('focus-visible:ring-orange-500')
-        expect(toggle.querySelector('.motion-reduce\\:animate-none')).not.toBeNull()
+        expect(document.querySelector('.motion-reduce\\:animate-none')).not.toBeNull()
+        expect(document.querySelectorAll('.motion-safe\\:animate-pulse')).toHaveLength(1)
         expect(screen.getByText('Burn').parentElement).toHaveClass('shadow-[0_0_20px_rgba(249,115,22,0.18)]')
     })
 
-    it('shows unavailable separately from repair failures and keeps a mobile-safe details affordance', async () => {
+    it('keeps the off state quiet without flame animation', async () => {
+        renderControl({ getBurnMode: vi.fn().mockResolvedValue(state()), updateBurnMode: vi.fn(), retryBurnMode: vi.fn() } as unknown as ApiClient)
+        await screen.findByRole('switch', { name: /Turn Burn on/i })
+        expect(document.querySelector('.motion-safe\\:animate-pulse')).toBeNull()
+    })
+
+    it('shows bots with no controls separately from repair failures and keeps a mobile-safe details affordance', async () => {
         const getBurnMode = vi.fn().mockResolvedValue(state({ enabled: true, sessions: [{ sessionId: 'one', status: 'unsupported', detail: 'Codex capability unavailable', previous: { modelReasoningEffort: null, serviceTier: null } }] }))
         renderControl({ getBurnMode, updateBurnMode: vi.fn(), retryBurnMode: vi.fn() } as unknown as ApiClient)
-        await screen.findByRole('button', { name: /Burn status: 1 unavailable/i })
-        fireEvent.click(screen.getByRole('button', { name: /Burn status: 1 unavailable/i }))
+        await screen.findByRole('button', { name: /Burn status: 1 no controls/i })
+        fireEvent.click(screen.getByRole('button', { name: /Burn status: 1 no controls/i }))
         expect(screen.getByRole('dialog')).toHaveClass('max-h-[85dvh]')
         expect(screen.getByText('First bot')).toBeInTheDocument()
-        expect(screen.getByText('Unsupported')).toBeInTheDocument()
+        expect(screen.getByText('No controls')).toBeInTheDocument()
         expect(screen.getByText(/reasoning Default.*tier Default/)).toBeInTheDocument()
+    })
+
+    it('shows a generic saved effort when the hub reports a non-Codex baseline', async () => {
+        const genericPrevious = { modelReasoningEffort: null, serviceTier: null, effort: null }
+        const getBurnMode = vi.fn().mockResolvedValue(state({ enabled: true, sessions: [
+            { sessionId: 'one', status: 'applied', detail: 'Highest supported effort active', previous: genericPrevious as never },
+        ] }))
+        renderControl({ getBurnMode, updateBurnMode: vi.fn(), retryBurnMode: vi.fn() } as unknown as ApiClient)
+        await screen.findByRole('button', { name: /Burn status: 1 applied/i })
+        fireEvent.click(screen.getByRole('button', { name: /Burn status: 1 applied/i }))
+        expect(screen.getByText('Saved: effort Default')).toBeInTheDocument()
     })
 
     it('does not loop a failed read and offers an explicit retry', async () => {
@@ -145,11 +163,11 @@ describe('BurnModeControl', () => {
 })
 
 describe('getBurnModeSummary', () => {
-    it('reports unsupported bots as unavailable rather than needing repair', () => {
+    it('reports bots without controls separately from repair failures', () => {
         expect(getBurnModeSummary(state({ enabled: true, sessions: [
             { sessionId: 'one', status: 'applied', detail: '', previous: null },
             { sessionId: 'two', status: 'unsupported', detail: '', previous: null },
-        ] }))).toBe('1 unavailable')
+        ] }))).toBe('1 no controls')
     })
 
     it('does not report an unsuccessful restore as merely zero pending', () => {
