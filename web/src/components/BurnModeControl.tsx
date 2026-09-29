@@ -56,10 +56,11 @@ export function BurnModeControl(props: { api: ApiClient | null; sessions: Sessio
     const isSwitchDisabled = burn.isUpdating || !state
     const switchLabel = state?.enabled ? 'Turn Burn off and restore saved settings' : 'Turn Burn on for supported bots'
     const statusSummary = burn.readError ? 'Unavailable (stale)' : getBurnModeSummary(state)
+    const enabledTextStyle = state?.enabled ? { color: 'light-dark(#9a3412, #fdba74)' } : undefined
 
     return <>
-        <div className={`flex min-h-11 items-center gap-1 rounded-lg px-1 text-xs transition-colors ${state?.enabled ? 'bg-orange-500/10 text-orange-700 shadow-[0_0_20px_rgba(249,115,22,0.18)]' : 'text-[var(--app-link)]'}`}>
-            <span className={`flex min-h-11 items-center gap-1.5 pl-2 font-semibold ${state?.enabled ? 'text-orange-700' : 'text-[var(--app-fg)]'}`}>
+        <div style={enabledTextStyle} className={`flex min-h-11 items-center gap-1 rounded-lg px-1 text-xs transition-colors ${state?.enabled ? 'bg-orange-500/10 shadow-[0_0_20px_rgba(249,115,22,0.18)]' : 'text-[var(--app-link)]'}`}>
+            <span className={`flex min-h-11 items-center gap-1.5 pl-2 font-semibold ${state?.enabled ? '' : 'text-[var(--app-fg)]'}`}>
                 <span className={`flex h-7 w-7 items-center justify-center rounded-full transition-colors ${state?.enabled ? 'bg-gradient-to-br from-amber-300 via-orange-500 to-red-500 text-white shadow-[0_0_14px_rgba(249,115,22,0.7)]' : 'bg-[var(--app-secondary-bg)] text-[var(--app-hint)]'}`}><FlameIcon animated={Boolean(state?.enabled)} /></span>
                 Burn
             </span>
@@ -70,7 +71,7 @@ export function BurnModeControl(props: { api: ApiClient | null; sessions: Sessio
                 <span aria-hidden="true" className={`absolute h-6 w-11 rounded-full transition-colors ${state?.enabled ? 'bg-gradient-to-r from-amber-400 via-orange-500 to-red-500 shadow-[0_0_12px_rgba(249,115,22,0.65)]' : 'bg-[var(--app-divider)]'}`} />
                 <span aria-hidden="true" className={`absolute left-0.5 flex h-5 w-5 items-center justify-center rounded-full bg-white shadow transition-transform ${state?.enabled ? 'translate-x-5 text-orange-500' : ''}`}>{state?.enabled ? <FlameIcon /> : null}</span>
             </button>
-            <button type="button" className={`min-h-11 min-w-0 rounded-md px-2 text-left text-xs hover:bg-[var(--app-secondary-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 ${state?.enabled ? 'text-orange-700' : 'text-[var(--app-link)]'}`}
+            <button type="button" style={enabledTextStyle} className="min-h-11 min-w-0 rounded-md px-2 text-left text-xs text-[var(--app-link)] hover:bg-[var(--app-secondary-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500"
                 aria-label={`Burn status: ${statusSummary}. View details`} onClick={() => setDetailsOpen(true)}>
                 {burn.isLoading ? 'Loading…' : statusSummary}
             </button>
