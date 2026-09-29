@@ -676,7 +676,6 @@ describe('useSendMessage', () => {
         expect(sendMessage).toHaveBeenCalled()
     })
 
-
     it('does not mutate when onSessionResolved defers for draft hydration', async () => {
         const sendMessage = vi.fn(async () => {})
         const api = createMockApi(sendMessage)
