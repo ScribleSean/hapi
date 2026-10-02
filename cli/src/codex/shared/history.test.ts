@@ -1,7 +1,43 @@
 import { describe, expect, it, vi } from 'vitest';
-import { firstTurnUserMessage, streamThreadHistory } from './history';
+import { firstTurnUserMessage, readHistoryHead, streamThreadHistory } from './history';
 
 describe('bounded native history', () => {
+    it.each([
+        'thread thread not materialized yet; thread/turns/list is unavailable before first user message',
+        'invalid paginated history lineage for thread: missing source rollout'
+    ])('treats a proven in-memory thread as empty, then reads its first materialized turn: %s', async message => {
+        let materialized = false;
+        const request = vi.fn(async (method: string) => {
+            if (method === 'thread/read') return { thread: { id: 'thread', historyMode: 'paginated', path: '/allocated/rollout.jsonl' } };
+            if (method === 'thread/turns/list') {
+                if (!materialized) throw new Error(message);
+                return { data: [{ id: 'first', status: 'completed' }], nextCursor: null };
+            }
+            return { data: [{ turnId: 'first', item: { id: 'reply', type: 'agentMessage', text: 'OK' } }], nextCursor: null };
+        });
+        const client = { request } as never;
+        const onItems = vi.fn(async () => {});
+        expect(await readHistoryHead(client, 'thread', true)).toBeUndefined();
+        expect(await streamThreadHistory(client, 'thread', onItems, () => true, true)).toBeUndefined();
+        expect(onItems).not.toHaveBeenCalled();
+        materialized = true;
+        expect(await streamThreadHistory(client, 'thread', onItems)).toMatchObject({ id: 'first' });
+        expect(onItems).toHaveBeenCalledOnce();
+    });
+
+    it.each(['/persisted/rollout.jsonl', null, undefined])('preserves missing-lineage failures for existing threads regardless of path: %s', async path => {
+        const request = vi.fn(async (method: string) => {
+            if (method === 'thread/read') return { thread: { id: 'thread', historyMode: 'paginated', path } };
+            throw new Error('invalid paginated history lineage for thread: missing source rollout');
+        });
+        await expect(readHistoryHead({ request } as never, 'thread')).rejects.toThrow('missing source rollout');
+    });
+
+    it('does not hide unrelated history errors', async () => {
+        const request = vi.fn(async () => { throw new Error('invalid paginated history lineage for thread: missing parent'); });
+        await expect(readHistoryHead({ request } as never, 'thread')).rejects.toThrow('missing parent');
+        expect(request).toHaveBeenCalledOnce();
+    });
     it('uses summary turn pages and small exact item pages without retaining full turns', async () => {
         const request = vi.fn(async (method: string, params: Record<string, unknown>) => {
             if (method === 'thread/turns/list') {

@@ -3,13 +3,30 @@ import { record, string } from './gateway';
 
 const PAGE_SIZE = 8;
 
+/** 0.159 keeps a new paginated thread in memory until its first user turn. */
+async function turnPage(client: CodexAppServerClient, threadId: string, params: Record<string, unknown>, newlyCreated: boolean): Promise<Record<string, unknown>> {
+    try { return record(await client.request('thread/turns/list', { threadId, ...params })); }
+    catch (error) {
+        const message = error instanceof Error ? error.message : '';
+        const empty = message.includes('not materialized yet; thread/turns/list is unavailable before first user message')
+            || newlyCreated && message === `invalid paginated history lineage for ${threadId}: missing source rollout`;
+        if (!empty || params.cursor) throw error;
+        // A path is allocated before a rollout exists in 0.159. Missing
+        // lineage is empty only for a thread just created in this process;
+        // never infer that from a persisted path or an empty metadata preview.
+        const thread = record(record(await client.request('thread/read', { threadId, includeTurns: false })).thread);
+        if (thread.id !== threadId || thread.historyMode !== 'paginated') throw error;
+        return { data: [], nextCursor: null };
+    }
+}
+
 export type HistoryTurn = Record<string, unknown>;
 
 /** A single bounded page establishes active-turn state before full replay. */
-export async function readHistoryHead(client: CodexAppServerClient, threadId: string): Promise<HistoryTurn | undefined> {
-    const page = record(await client.request('thread/turns/list', {
-        threadId, sortDirection: 'desc', itemsView: 'notLoaded', limit: 1
-    }));
+export async function readHistoryHead(client: CodexAppServerClient, threadId: string, newlyCreated = false): Promise<HistoryTurn | undefined> {
+    const page = await turnPage(client, threadId, {
+        sortDirection: 'desc', itemsView: 'notLoaded', limit: 1
+    }, newlyCreated);
     if (!Array.isArray(page.data)) throw new Error('Invalid Codex turn history');
     return page.data.length ? { ...record(page.data[0]), items: [] } : undefined;
 }
@@ -20,15 +37,15 @@ export async function readHistoryHead(client: CodexAppServerClient, threadId: st
  * large, and a complete turn is not a safe WebSocket response unit.
  */
 export async function streamThreadHistory(client: CodexAppServerClient, threadId: string,
-    onItems: (turn: HistoryTurn, items: unknown[]) => Promise<void>, shouldContinue: () => boolean = () => true): Promise<HistoryTurn | undefined> {
+    onItems: (turn: HistoryTurn, items: unknown[]) => Promise<void>, shouldContinue: () => boolean = () => true, newlyCreated = false): Promise<HistoryTurn | undefined> {
     let cursor: string | undefined;
     const turnCursors = new Set<string>();
     let latest: HistoryTurn | undefined;
     do {
         if (!shouldContinue()) throw new Error('Codex history sync stopped');
-        const turnsPage = record(await client.request('thread/turns/list', {
-            threadId, cursor, sortDirection: 'asc', itemsView: 'notLoaded', limit: PAGE_SIZE
-        }));
+        const turnsPage = await turnPage(client, threadId, {
+            cursor, sortDirection: 'asc', itemsView: 'notLoaded', limit: PAGE_SIZE
+        }, newlyCreated);
         if (!Array.isArray(turnsPage.data)) throw new Error('Invalid Codex turn history');
         for (const value of turnsPage.data) {
             if (!shouldContinue()) throw new Error('Codex history sync stopped');

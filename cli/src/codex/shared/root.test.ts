@@ -15,6 +15,8 @@ type NativeTurn = { id: string; status: string; items: unknown[] };
 vi.mock('../codexAppServerClient', () => ({
     CodexAppServerClient: class {
         initialized = false;
+        unmaterialized = false;
+        resumeCalls = 0;
         thread = { id: 'thread', historyMode: 'paginated', turns: [] as NativeTurn[] };
         settings: Record<string, unknown> = { model: 'mock', collaborationMode: { mode: 'default' } };
         queue: Array<{ id: string; clientUserMessageId: unknown; input: unknown }> = [];
@@ -30,8 +32,13 @@ vi.mock('../codexAppServerClient', () => ({
         isInitialized() { return this.initialized; }
         async disconnect() { this.initialized = false; }
         async request(method: string, params: Record<string, unknown> = {}) {
+            if (method === 'thread/resume') {
+                this.resumeCalls++;
+                if (this.unmaterialized) throw new Error('no rollout found for thread id thread');
+            }
+            if (method === 'thread/turns/list' && this.unmaterialized) throw new Error('invalid paginated history lineage for thread: missing source rollout');
             if (method === 'thread/goal/get') return { goal: this.goal };
-            if (method === 'thread/read' || method === 'thread/resume') return { ...this.settings, thread: structuredClone(this.thread) };
+            if (method === 'thread/read' || method === 'thread/resume') return { ...this.settings, thread: { ...structuredClone(this.thread), path: '/rollout.jsonl' } };
             if (method === 'thread/turns/list') return { data: this.thread.turns.map(turn => ({ ...turn, items: [] })), nextCursor: null };
             if (method === 'thread/items/list') {
                 await this.itemGate;
@@ -65,7 +72,7 @@ afterEach(async () => {
     finally { vi.useRealTimers(); }
 });
 
-async function fixture(options: { paginated?: boolean; turns?: NativeTurn[]; itemGate?: Promise<void> } = {}) {
+async function fixture(options: { paginated?: boolean; turns?: NativeTurn[]; itemGate?: Promise<void>; newlyCreated?: boolean } = {}) {
     const directory = await mkdtemp(join(tmpdir(), 'hapi-shared-root-'));
     let state: AgentState = { steeringActive: true };
     let metadata: Metadata = { path: directory, host: 'test', flavor: 'codex' };
@@ -94,6 +101,8 @@ async function fixture(options: { paginated?: boolean; turns?: NativeTurn[]; ite
     await root.prepare();
     const native = root.client as unknown as {
         initialized: boolean;
+        unmaterialized: boolean;
+        resumeCalls: number;
         goal: Record<string, unknown> | null;
         settings: Record<string, unknown>;
         itemGate?: Promise<void>;
@@ -104,11 +113,26 @@ async function fixture(options: { paginated?: boolean; turns?: NativeTurn[]; ite
     };
     if (options.turns) native.thread.turns = options.turns;
     native.itemGate = options.itemGate;
-    await root.bind('thread', { model: 'mock', thread: { id: 'thread', ...(options.paginated ? { historyMode: 'paginated' } : {}), turns: [] } }, false);
+    native.unmaterialized = options.newlyCreated ?? false;
+    await root.bind('thread', { model: 'mock', thread: { id: 'thread', ...(options.paginated ? { historyMode: 'paginated' } : {}), turns: [] } }, options.newlyCreated ?? false, options.newlyCreated);
     return { root, native, rpc, send, user: () => user, metadata: () => metadata, state: () => state, updateState, reconnect: () => reconnect?.() };
 }
 
 describe('durable Codex provider and goal state', () => {
+    it('binds a fresh 0.159 root without resume and syncs after its first completed turn', async () => {
+        const f = await fixture({ paginated: true, newlyCreated: true });
+        await vi.waitFor(() => expect(f.state().codexHistorySync).toBeNull());
+        expect(f.native.resumeCalls).toBe(0);
+        f.native.unmaterialized = false;
+        f.native.thread.turns = [{ id: 'first', status: 'completed', items: [{ id: 'reply', type: 'agentMessage', text: 'First reply' }] }];
+        const refresh = vi.spyOn(f.root, 'refresh');
+        f.native.notify('turn/completed', { threadId: 'thread', turn: f.native.thread.turns[0] });
+        await vi.waitFor(() => expect(refresh).toHaveBeenCalledOnce());
+        await vi.waitFor(() => expect(f.send).toHaveBeenCalled());
+        f.native.notify('turn/completed', { threadId: 'thread', turn: f.native.thread.turns[0] });
+        await new Promise(resolve => setTimeout(resolve, 0));
+        expect(refresh).toHaveBeenCalledOnce();
+    });
     it('persists native provider identity and preserves it on partial settings events', async () => {
         const f = await fixture();
         f.root.acceptSettings({ model: 'local-model', modelProvider: 'ollama' });

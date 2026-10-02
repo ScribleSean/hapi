@@ -66,6 +66,8 @@ export class SharedCodexRoot {
     private publishedGoal: string | undefined;
     private refreshing?: Promise<void>;
     private historySync?: Promise<void>;
+    private awaitingFirstTurnHistory = false;
+    private pendingMaterialization = false;
     private interrupted = false;
     private closed = false;
     private stopping = false;
@@ -89,11 +91,13 @@ export class SharedCodexRoot {
             if (method === 'thread/settings/updated' && record(params).threadId === this.threadId) this.acceptSettings(record(record(params).threadSettings));
             if (record(params).threadId === this.threadId) {
                 if (method === 'turn/started') {
+                    this.pendingMaterialization = false;
                     this.turnRevision++; this.currentTurn = string(record(record(params).turn).id); this.interrupted = false;
                     if (this.currentTurn) this.latestTurn = { id: this.currentTurn, status: 'inProgress' };
                     this.publishSteering();
                 }
                 if (method === 'turn/completed' && (!this.currentTurn || record(record(params).turn).id === this.currentTurn)) {
+                    this.pendingMaterialization = false;
                     this.turnRevision++; this.currentTurn = undefined; this.interrupted = record(record(params).turn).status === 'interrupted';
                     this.publishSteering();
                 }
@@ -192,9 +196,10 @@ export class SharedCodexRoot {
             'shell_environment_policy.set.HAPI_SESSION_ID': this.session.sessionId
         } };
     }
-    async bind(threadId: string, response: Record<string, unknown>, subscribe: boolean): Promise<void> {
+    async bind(threadId: string, response: Record<string, unknown>, subscribe: boolean, newlyCreated = false): Promise<void> {
         if (this.threadId && this.threadId !== threadId) throw new Error('Cannot retarget a shared HAPI session');
         this.threadId = threadId;
+        this.pendingMaterialization = newlyCreated;
         this.queue = new SharedCodexQueue(this.client, threadId, join(this.host.directory, `${this.session.sessionId}.queue.json`),
             (ids, steered) => this.session.emitMessagesConsumed(ids, { steered }), ids => this.session.emitSteerIndeterminate(ids),
             (id, input) => this.session.syncNativeQueuedMessage(id, input === null ? null : inputText(input)),
@@ -211,7 +216,9 @@ export class SharedCodexRoot {
             completedRequests: { ...state.completedRequests, ...Object.fromEntries(Object.entries(state.requests ?? {}).map(([id, request]) =>
                 [id, { ...request, completedAt: Date.now(), status: 'canceled' as const }])) }
         }));
-        if (subscribe) response = record(await this.client.request('thread/resume', { threadId, excludeTurns: true }));
+        // thread/start and thread/fork already subscribe initialized clients.
+        // Resuming a fresh 0.159 thread fails before its first user message.
+        if (subscribe && !newlyCreated) response = record(await this.client.request('thread/resume', { threadId, excludeTurns: true }));
         this.acceptSettings(response); this.acceptSettings(this.host.settingsFor(threadId) ?? {});
         const thread = record(response.thread);
         if (thread.historyMode !== 'paginated') {
@@ -222,7 +229,9 @@ export class SharedCodexRoot {
         // user input waits for it so no prompt can overtake native history.
         const revision = this.turnRevision;
         this.session.updateAgentState(state => ({ ...state, codexHistorySync: 'syncing' }));
-        const head = await readHistoryHead(this.client, threadId);
+        const head = await readHistoryHead(this.client, threadId, this.pendingMaterialization);
+        if (head) this.pendingMaterialization = false;
+        this.awaitingFirstTurnHistory = newlyCreated && !head;
         this.applyHistoryHead(head, revision);
         this.historySync = this.refresh().then(() => this.refreshChildren(true)).then(() => {
             if (!this.closed) this.session.updateAgentState(state => ({ ...state, codexHistorySync: null }));
@@ -309,6 +318,11 @@ export class SharedCodexRoot {
         if (method === 'thread/goal/cleared' && eventThread === this.threadId) this.publishGoal(null);
         if (method === 'thread/queue/changed') await this.queue.reconcile();
         await this.projection.notification(method, params, modelAtReceipt); this.alive();
+        if (method === 'turn/completed' && this.awaitingFirstTurnHistory) {
+            await this.historySync;
+            await this.refresh();
+            this.awaitingFirstTurnHistory = false;
+        }
     }
     async readThread(threadId = this.threadId): Promise<Record<string, unknown>> {
         // A metadata read tells us whether this thread opted into the only
@@ -325,7 +339,7 @@ export class SharedCodexRoot {
         try {
             return await streamThreadHistory(this.client, threadId, async (turn, items) => {
                 await projection.history({ turns: [{ ...turn, items }] });
-            }, () => !this.closed && !this.stopping);
+            }, () => !this.closed && !this.stopping, threadId === this.threadId && this.pendingMaterialization);
         } finally { projection.endHistory(); }
     }
     refresh(): Promise<void> {
@@ -536,7 +550,7 @@ export class SharedCodexRoot {
             const work = this.work.catch(() => {}).then(async () => {
                 if (this.closed || this.stopping || this.reconnecting || !this.client.isInitialized()) return unavailable();
                 const revision = this.turnRevision;
-                const head = await readHistoryHead(this.client, this.threadId);
+                const head = await readHistoryHead(this.client, this.threadId, this.pendingMaterialization);
                 this.applyHistoryHead(head, revision);
                 if (this.closed || this.stopping || this.reconnecting || !this.client.isInitialized()) return unavailable();
                 const expectedTurnId = this.currentTurn;
