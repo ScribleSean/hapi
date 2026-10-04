@@ -600,6 +600,7 @@ export function DictationButton(props: {
 export function ComposerButtons(props: {
     canSend: boolean
     controlsDisabled: boolean
+    showAttachmentButton?: boolean
     showSettingsButton: boolean
     settingsButtonRef?: Ref<HTMLButtonElement>
     settingsDisabled?: boolean
@@ -680,14 +681,14 @@ export function ComposerButtons(props: {
             >
                 <OrderedToolbarItems layout={effectiveLayout}>
                 <ToolbarItemSlot item="attachment">
-                <ComposerPrimitive.AddAttachment
+                {props.showAttachmentButton !== false ? <ComposerPrimitive.AddAttachment
                     aria-label={t('composer.attach')}
                     title={t('composer.attach')}
                     disabled={props.controlsDisabled || hasSchedule}
                     className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-fg)]/60 transition-colors hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                     <AttachmentIcon />
-                </ComposerPrimitive.AddAttachment>
+                </ComposerPrimitive.AddAttachment> : null}
                 </ToolbarItemSlot>
 
                 <ToolbarItemSlot item="settings">

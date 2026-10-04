@@ -2,7 +2,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook } from '@testing-library/react'
 import { createElement, type ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { SessionSummary } from '@/types/api'
+import type { Machine, SessionSummary } from '@/types/api'
+import { queryKeys } from '@/lib/query-keys'
 import type { Session } from '@/types/api'
 import {
     applySessionDetailPatch,
@@ -45,8 +46,8 @@ class FakeEventSource {
     }
 }
 
-function renderUseSSE(options?: { onDisconnect?: (reason: string) => void }) {
-    const queryClient = new QueryClient()
+function renderUseSSE(options?: { onDisconnect?: (reason: string) => void; queryClient?: QueryClient }) {
+    const queryClient = options?.queryClient ?? new QueryClient()
     const wrapper = ({ children }: { children: ReactNode }) =>
         createElement(QueryClientProvider, { client: queryClient }, children)
     return renderHook(() => useSSE({
@@ -58,6 +59,36 @@ function renderUseSSE(options?: { onDisconnect?: (reason: string) => void }) {
         onDisconnect: options?.onDisconnect
     }), { wrapper })
 }
+
+describe('useSSE machine inventory', () => {
+    beforeEach(() => {
+        FakeEventSource.instances = []
+        vi.stubGlobal('EventSource', FakeEventSource)
+    })
+
+    afterEach(() => vi.unstubAllGlobals())
+
+    it.each(['record', 'patch'])('retains a machine going offline via a %s event', kind => {
+        const machine: Machine = {
+            id: 'windows', namespace: 'test', seq: 0, createdAt: 0, updatedAt: 10,
+            active: true, activeAt: 100, metadata: null, metadataVersion: 0,
+            runnerState: null, runnerStateVersion: 0,
+        }
+        const queryClient = new QueryClient()
+        queryClient.setQueryData(queryKeys.machines, { machines: [machine] })
+        const { unmount } = renderUseSSE({ queryClient })
+        const offline = { active: false, activeAt: 200, updatedAt: 300 }
+        act(() => FakeEventSource.instances[0].simulateMessage({
+            type: 'machine-updated', machineId: machine.id,
+            data: kind === 'record' ? { ...machine, ...offline } : offline,
+        }))
+        expect(queryClient.getQueryData(queryKeys.machines)).toEqual({ machines: [{ ...machine, ...offline }] })
+        expect(queryClient.getQueryState(queryKeys.machines)?.isInvalidated).toBe(false)
+        act(() => FakeEventSource.instances[0].simulateMessage({ type: 'machine-updated', machineId: machine.id, data: null }))
+        expect(queryClient.getQueryData(queryKeys.machines)).toEqual({ machines: [] })
+        unmount()
+    })
+})
 
 describe('useSSE connection liveness (mobile suspend/resume)', () => {
     beforeEach(() => {

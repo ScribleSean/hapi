@@ -287,6 +287,7 @@ export function HappyComposer(props: {
     onUploadDraftSnapshot?: (text: string, attachments: AttachmentDraftInput[]) => void
     canRestoreAttachments?: boolean
     disabled?: boolean
+    runnerControlsAvailable?: boolean
     permissionMode?: PermissionMode
     collaborationMode?: CodexCollaborationMode
     copilotAgentMode?: CopilotAgentMode
@@ -977,7 +978,7 @@ export function HappyComposer(props: {
         haptic('light')
     }, [api, suggestions, inputState, autocompletePrefixes, haptic, richMentionsEnabled, handleUserEdit])
 
-    const abortDisabled = controlsDisabled || isAborting || !threadIsRunning
+    const abortDisabled = props.runnerControlsAvailable === false || controlsDisabled || isAborting || !threadIsRunning
     const switchDisabled = controlsDisabled || isSwitching || !controlledByUser
     const showSwitchButton = Boolean(controlledByUser && onSwitchToRemote)
     const showTerminalButton = Boolean(onTerminal || terminalUnsupported)
@@ -1442,6 +1443,7 @@ export function HappyComposer(props: {
     // Re-clicking with a different anchor while open switches the anchor
     // instead of closing, so model->effort moves between sections directly.
     const handleSettingsToggle = useCallback((section: 'model' | 'effort' | 'speed' | null = null) => {
+        if (props.runnerControlsAvailable === false) return
         haptic('light')
         if (showSettings && section !== settingsSection) {
             // Open with a different anchor: switch sections, keep the sheet up.
@@ -1457,7 +1459,7 @@ export function HappyComposer(props: {
         }
         setSettingsSection(section)
         setShowSettings(true)
-    }, [haptic, showSettings, settingsSection])
+    }, [haptic, showSettings, settingsSection, props.runnerControlsAvailable])
 
     const clearCursorDrillDown = useCallback(() => {
         setCursorDrillDownBase(null)
@@ -1629,7 +1631,7 @@ export function HappyComposer(props: {
         || showEffortSettings
         || showFastModeSettings
     )
-    const showAbortButton = true
+    const showAbortButton = props.runnerControlsAvailable !== false
     const voiceEnabled = Boolean(effectiveVoiceToggle)
     const routesToScratchlist = (props.scratchlistMode ?? false) && pendingSchedule == null
 
@@ -2411,7 +2413,8 @@ export function HappyComposer(props: {
                         <ComposerButtons
                             canSend={canSend}
                             controlsDisabled={controlsDisabled}
-                            showSettingsButton={showSettingsButton}
+                            showAttachmentButton={props.runnerControlsAvailable !== false}
+                            showSettingsButton={props.runnerControlsAvailable !== false && showSettingsButton}
                             settingsButtonRef={settingsButtonRef}
                             settingsDisabled={modelEffortControlsDisabled}
                             modelValueButtonRef={modelValueButtonRef}
@@ -2442,11 +2445,11 @@ export function HappyComposer(props: {
                             onSchedule={handleUserSchedule}
                             onClearSchedule={onUserClearSchedule}
                             hasAttachments={blocksScheduling}
-                            modelValueLabel={modelValueLabel}
+                            modelValueLabel={props.runnerControlsAvailable === false ? undefined : modelValueLabel}
                             modelValueDisabled={modelEffortControlsDisabled}
                             modelValueOpen={showSettings && settingsSection !== 'effort'}
                             onModelValueToggle={handleModelValueToggle}
-                            effortValueLabel={effortValueLabel}
+                            effortValueLabel={props.runnerControlsAvailable === false ? undefined : effortValueLabel}
                             effortValueDisabled={modelEffortControlsDisabled}
                             effortValueOpen={showSettings && settingsSection !== 'model'}
                             onEffortValueToggle={handleEffortValueToggle}

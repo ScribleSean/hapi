@@ -20,6 +20,17 @@ function setup(flavor = 'codex', extra = {}) {
     return { session, methods, api: methods as unknown as ApiClient }
 }
 describe('reasoning capability preflight', () => {
+    it('does not expose reasoning settings or write effort for HTTP Claude sessions', async () => {
+        const { api, methods, session } = setup('claude')
+        Object.assign(session.metadata!, { version: 'claude-http-v1' })
+        const target = await loadReasoningTarget(api, summary('claude'))
+        expect(target.unavailable).toContain('HTTP Claude')
+        expect(target.options).toEqual([])
+        const results = await applyReasoningTargets(api, [target], 'high')
+        expect(results[0].status).toBe('skipped')
+        expect(methods.setEffort).not.toHaveBeenCalled()
+    })
+
     it('does not contact offline sessions or unsupported harnesses', async () => {
         const { api, methods } = setup()
         expect((await loadReasoningTarget(api, summary('codex', { active: false }))).unavailable).toContain('Offline')

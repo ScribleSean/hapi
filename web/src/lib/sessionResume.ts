@@ -1,5 +1,6 @@
 import { isKnownFlavor } from '@hapi/protocol'
 import type { Session } from '@/types/api'
+import { isExternalClaudeSession } from '@/lib/sessionTransport'
 
 /** Agent thread id used by hub `resolveAgentResumeId`, flavor-specific.
  *  Mirrors hub: cross-flavor ids are ignored to avoid the web layer claiming a
@@ -43,6 +44,7 @@ export function inactiveSessionCanResume(
     userMessageCount: number,
     cursorChatOnDisk?: boolean,
 ): boolean {
+    if (isExternalClaudeSession(session.metadata)) return false
     if (session.active) {
         return true
     }

@@ -6,6 +6,8 @@ import type { ReopenSessionResponse } from '@hapi/protocol/apiTypes'
 import { queryKeys } from '@/lib/query-keys'
 import { clearMessageWindow } from '@/lib/message-window-store'
 import { isKnownFlavor } from '@hapi/protocol'
+import type { Session } from '@/types/api'
+import { isExternalClaudeSession } from '@/lib/sessionTransport'
 
 export const sessionModelMutationKey = (sessionId: string) => ['session-model', sessionId] as const
 
@@ -13,7 +15,8 @@ export function useSessionActions(
     api: ApiClient | null,
     sessionId: string | null,
     agentFlavor?: string | null,
-    codexCollaborationModeSupported?: boolean
+    codexCollaborationModeSupported?: boolean,
+    metadata?: Session['metadata']
 ): {
     abortSession: () => Promise<void>
     archiveSession: () => Promise<void>
@@ -34,6 +37,9 @@ export function useSessionActions(
     isPending: boolean
 } {
     const queryClient = useQueryClient()
+    const assertRunnerControls = () => {
+        if (isExternalClaudeSession(metadata)) throw new Error('HTTP Claude sessions do not support runner controls.')
+    }
 
     const markSessionActiveInCache = (targetSessionId: string) => {
         // 中文注释：恢复/重开接口成功后，session-alive SSE 可能已经先到或稍后才到。
@@ -82,6 +88,7 @@ export function useSessionActions(
             if (!api || !sessionId) {
                 throw new Error('Session unavailable')
             }
+            assertRunnerControls()
             await api.abortSession(sessionId)
         },
         onSuccess: () => void invalidateSession(),
@@ -92,6 +99,7 @@ export function useSessionActions(
             if (!api || !sessionId) {
                 throw new Error('Session unavailable')
             }
+            assertRunnerControls()
             await api.archiveSession(sessionId)
         },
         onSuccess: () => void invalidateSession(),
@@ -102,6 +110,7 @@ export function useSessionActions(
             if (!api || !sessionId) {
                 throw new Error('Session unavailable')
             }
+            assertRunnerControls()
             return await api.reopenSession(sessionId)
         },
         onSuccess: (result) => {
@@ -124,6 +133,7 @@ export function useSessionActions(
             if (!api || !sessionId) {
                 throw new Error('Session unavailable')
             }
+            assertRunnerControls()
             await api.switchSession(sessionId)
         },
         onSuccess: () => void invalidateSession(),
@@ -137,6 +147,7 @@ export function useSessionActions(
             if (isKnownFlavor(agentFlavor) && !isPermissionModeAllowedForFlavor(mode, agentFlavor)) {
                 throw new Error('Invalid permission mode for session flavor')
             }
+            assertRunnerControls()
             await api.setPermissionMode(sessionId, mode)
         },
         onSuccess: () => void invalidateSession(),
@@ -153,6 +164,7 @@ export function useSessionActions(
             if (!codexCollaborationModeSupported) {
                 throw new Error('Collaboration mode is only supported for remote Codex sessions')
             }
+            assertRunnerControls()
             await api.setCollaborationMode(sessionId, mode)
         },
         onSuccess: () => void invalidateSession(),
@@ -166,6 +178,7 @@ export function useSessionActions(
             if (agentFlavor !== 'copilot') {
                 throw new Error('Agent mode is only supported for Copilot sessions')
             }
+            assertRunnerControls()
             await api.setCopilotAgentMode(sessionId, mode)
         },
         onSuccess: () => void invalidateSession(),
@@ -177,6 +190,7 @@ export function useSessionActions(
             if (!api || !sessionId) {
                 throw new Error('Session unavailable')
             }
+            assertRunnerControls()
             await api.setModel(sessionId, model)
         },
         onSuccess: async () => {
@@ -196,6 +210,7 @@ export function useSessionActions(
             if (agentFlavor === 'codex' && !codexCollaborationModeSupported) {
                 throw new Error('Model reasoning effort is only supported for remote sessions')
             }
+            assertRunnerControls()
             await api.setModelReasoningEffort(sessionId, modelReasoningEffort)
         },
         onSuccess: () => void invalidateSession(),
@@ -206,6 +221,7 @@ export function useSessionActions(
             if (!api || !sessionId) {
                 throw new Error('Session unavailable')
             }
+            assertRunnerControls()
             await api.setEffort(sessionId, effort)
         },
         onSuccess: () => void invalidateSession(),
@@ -222,6 +238,7 @@ export function useSessionActions(
             if (!codexCollaborationModeSupported) {
                 throw new Error('Fast mode is only supported for remote sessions')
             }
+            assertRunnerControls()
             await api.setServiceTier(sessionId, serviceTier)
         },
         onSuccess: () => void invalidateSession(),

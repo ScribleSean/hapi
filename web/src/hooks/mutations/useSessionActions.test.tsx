@@ -27,6 +27,27 @@ afterEach(() => {
 })
 
 describe('useSessionActions - reopenSession', () => {
+    it('blocks runner mutations while preserving hub-only metadata edits for HTTP sessions', async () => {
+        const apiMethods = {
+            abortSession: vi.fn(), archiveSession: vi.fn(), reopenSession: vi.fn(), switchSession: vi.fn(),
+            setPermissionMode: vi.fn(), setModel: vi.fn(), setEffort: vi.fn(), renameSession: vi.fn().mockResolvedValue(undefined),
+        }
+        const { result } = renderHook(() => useSessionActions(apiMethods as unknown as ApiClient, 'external', 'claude', false,
+            { flavor: 'claude', version: 'claude-http-v1', path: '/repo', host: 'host' }), { wrapper: createWrapper() })
+        for (const invoke of [
+            () => result.current.abortSession(), () => result.current.archiveSession(), () => result.current.reopenSession(),
+            () => result.current.switchSession(), () => result.current.setPermissionMode('default'),
+            () => result.current.setModel('sonnet'), () => result.current.setEffort('high'),
+        ]) {
+            await act(async () => { await expect(invoke()).rejects.toThrow('HTTP Claude sessions do not support runner controls.') })
+        }
+        for (const [name, method] of Object.entries(apiMethods)) {
+            if (name !== 'renameSession') expect(method).not.toHaveBeenCalled()
+        }
+        await act(async () => { await result.current.renameSession('New title') })
+        expect(apiMethods.renameSession).toHaveBeenCalledWith('external', 'New title')
+    })
+
     it('invokes api.reopenSession with the session id and forwards the response', async () => {
         const reopen = vi.fn(async (_sessionId: string) => ({
             ok: true as const,
