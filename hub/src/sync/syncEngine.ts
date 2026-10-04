@@ -27,6 +27,7 @@ import type { SSEManager } from '../sse/sseManager'
 import { CursorLegacyMigrator, type CursorLegacyMigratorOptions } from '../cursor/cursorLegacyMigrator'
 
 import { EventPublisher, type SyncEventListener } from './eventPublisher'
+import { ExternalSessionService } from './externalSessionService'
 import { MachineCache, type Machine } from './machineCache'
 import { MessageService, type RetryIndeterminateMessageResult } from './messageService'
 import { createTitleSuggestionService, type TitleSuggestionService } from './titleSuggestion'
@@ -180,6 +181,7 @@ function extractClaudeUserMessageTextFromAgentOutput(content: unknown): string |
 }
 
 export class SyncEngine {
+    readonly externalSessions: ExternalSessionService
     private readonly eventPublisher: EventPublisher
     private readonly sessionCache: SessionCache
     private readonly machineCache: MachineCache
@@ -233,6 +235,7 @@ export class SyncEngine {
             }
         })
         this.machineCache = new MachineCache(store, this.eventPublisher)
+        this.externalSessions = new ExternalSessionService(store, this, this.sessionCache)
         this.messageService = new MessageService(
             store,
             io,

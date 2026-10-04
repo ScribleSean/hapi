@@ -5,6 +5,19 @@ import type { WebAppEnv } from '../middleware/auth'
 import { createMachinesRoutes } from './machines'
 import { RpcTargetMissingError } from '../../sync/rpcGateway'
 import { MACHINE_CAPABILITIES } from '@hapi/protocol'
+import { Store } from '../../store'
+import { MachineCache } from '../../sync/machineCache'
+import { EventPublisher } from '../../sync/eventPublisher'
+
+function createInventoryApp(engine: Partial<SyncEngine> | null, namespace = 'default') {
+    const app = new Hono<WebAppEnv>()
+    app.use('*', async (context, next) => {
+        context.set('namespace', namespace)
+        await next()
+    })
+    app.route('/api', createMachinesRoutes(() => engine as SyncEngine | null))
+    return app
+}
 
 function createMachine(overrides?: Partial<Machine>): Machine {
     return {
@@ -29,6 +42,74 @@ function createMachine(overrides?: Partial<Machine>): Machine {
 }
 
 describe('machines routes', () => {
+    describe('known machine inventory', () => {
+        it('lists online and offline machines with active/activeAt using the authorized namespace', async () => {
+            const machines = [createMachine(), createMachine({ id: 'offline-device', active: false, activeAt: 123 })]
+            const namespaces: string[] = []
+            const app = createInventoryApp({
+                getMachinesByNamespace: namespace => { namespaces.push(namespace); return machines },
+                getOnlineMachinesByNamespace: () => { throw new Error('must not filter inventory to online machines') }
+            }, 'owner')
+            const response = await app.request('/api/machines')
+            expect(response.status).toBe(200)
+            expect(await response.json()).toEqual({ machines })
+            expect(namespaces).toEqual(['owner'])
+        })
+
+        it('includes persisted offline zero-session devices and excludes other namespaces after reload', async () => {
+            const store = new Store(':memory:')
+            try {
+                const metadata = { host: 'known-host', platform: 'win32', happyCliVersion: '1.0.0' }
+                store.machines.getOrCreateMachine('offline-device', metadata, null, 'owner')
+                store.machines.getOrCreateMachine('private-device', metadata, null, 'other')
+                const cache = new MachineCache(store, new EventPublisher({ broadcast() {} } as never, () => undefined))
+                cache.reloadAll()
+                const app = createInventoryApp({ getMachinesByNamespace: namespace => cache.getMachinesByNamespace(namespace) }, 'owner')
+                const response = await app.request('/api/machines')
+                const body = await response.json() as { machines: Machine[] }
+                expect(body.machines.map(machine => machine.id)).toEqual(['offline-device'])
+                expect(body.machines[0].active).toBe(false)
+                expect(typeof body.machines[0].activeAt).toBe('number')
+                expect(store.sessions.getSessions()).toHaveLength(0)
+            } finally {
+                store.close()
+            }
+        })
+
+        it('retains an expired device and its last heartbeat instead of dropping it from the list', async () => {
+            const store = new Store(':memory:')
+            try {
+                const cache = new MachineCache(store, new EventPublisher({ broadcast() {} } as never, () => undefined))
+                cache.getOrCreateMachine('expiring-device', {
+                    host: 'known-host', platform: 'win32', happyCliVersion: '1.0.0'
+                }, null, 'default')
+                const heartbeatAt = Date.now()
+                cache.handleMachineAlive({ machineId: 'expiring-device', time: heartbeatAt })
+                const app = createInventoryApp({ getMachinesByNamespace: namespace => cache.getMachinesByNamespace(namespace) })
+                cache.expireInactive(heartbeatAt + 45_000)
+                expect((await (await app.request('/api/machines')).json() as { machines: Machine[] }).machines[0].active).toBe(true)
+                cache.expireInactive(heartbeatAt + 45_001)
+                const body = await (await app.request('/api/machines')).json() as { machines: Machine[] }
+                expect(body.machines).toHaveLength(1)
+                expect(body.machines[0]).toMatchObject({ id: 'expiring-device', active: false, activeAt: heartbeatAt })
+                expect(store.machines.getMachine('expiring-device')).not.toBeNull()
+            } finally {
+                store.close()
+            }
+        })
+
+        it('returns an empty inventory when no machines are known', async () => {
+            expect(await (await createInventoryApp({ getMachinesByNamespace: () => [] }).request('/api/machines')).json())
+                .toEqual({ machines: [] })
+        })
+
+        it('preserves the unavailable-engine response', async () => {
+            const response = await createInventoryApp(null).request('/api/machines')
+            expect(response.status).toBe(503)
+            expect(await response.json()).toEqual({ error: 'Not connected' })
+        })
+    })
+
     it('blocks spawn and availability inspection when the runner needs an upgrade', async () => {
         const machine = createMachine({
             metadata: {

@@ -13,6 +13,7 @@ import { constantTimeEquals } from '../../utils/crypto'
 import { parseAccessToken } from '../../utils/accessToken'
 import type { Machine, Session, SyncEngine } from '../../sync/syncEngine'
 import { SessionIdentityConflictError } from '../../store/sessions'
+import { createExternalSessionsRoutes } from './externalSessions'
 
 const bearerSchema = z.string().regex(/^Bearer\s+(.+)$/i)
 
@@ -357,5 +358,6 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
         return c.json({ machine: resolved.machine })
     })
 
+    app.route('/external-sessions', createExternalSessionsRoutes(getSyncEngine))
     return app
 }

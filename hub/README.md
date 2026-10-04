@@ -133,7 +133,7 @@ for request/response shapes and error semantics, and `src/web/routes/` for all e
 
 ### Machines (`src/web/routes/machines.ts`)
 
-- `GET /api/machines` - List online machines.
+- `GET /api/machines` - List all known machines in the caller's namespace, including offline and zero-session devices, with `active` and `activeAt`.
 - `PATCH /api/machines/:id` - Set/clear the machine display name.
 - `GET /api/machines/:id/agent-availability` - List installed/configured Agents.
 - `POST /api/machines/:id/spawn` - Spawn new session on machine.
