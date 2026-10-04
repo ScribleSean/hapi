@@ -278,13 +278,53 @@ All mod calls include the CLI bearer header and POSTs use
 
 5. Mod shutdown: `POST /cli/external-sessions/HAPI_ID/end` with `{}`.
 
+## Unsupported web actions for HTTP Claude sessions
+
+Identify this transport with `metadata.version === "claude-http-v1"`. Its
+HTTP inbox accepts text prompts only; it exposes **no CLI/runner RPC handlers**.
+Hide these actions rather than treating successful prompt storage as execution
+of a control command:
+
+| Web action | Not supported by this adapter |
+| --- | --- |
+| Terminal | Agent-terminal attachment/input/resize and shell terminal creation/input/resize. |
+| Permissions | Live permission-request transport, approve/deny buttons and permission-mode changes. The mod does not publish permission requests. |
+| Interrupt/control | Abort/stop the native agent, switch local/remote control, or archive an active session by stopping it. Only the mod's HTTP `end` marks it ended; it does not kill Claude. |
+| Lifecycle/history | Runner resume/reopen, clear/new-conversation orchestration, fork and rewind. These may call a real runner if one exists, but cannot control or safely resume the external mod. |
+| Agent configuration | Model, effort/reasoning, service-tier/speed, burn-mode and other runtime configuration switches. |
+| Native discovery | RPC-backed slash-command/skill/model discovery. Do not advertise slash commands as working controls solely because a text prompt can be delivered. |
+| Files/git/attachments | Native file/directory browsing or search, generated-image retrieval, git status/diff, uploads and upload deletion, and submitting prompt attachments. |
+| Queue controls | Cancel, steer or retry-indeterminate buttons. Polling and consumption acknowledgement exist, but there is no remote cancellation/steering/retry handshake with the mod. |
+
+Session listing, device grouping, transcript reading, text prompt composition,
+prompt consumption updates, and hub-only title/pin/scratchlist bookkeeping
+continue using existing models. Deleting an inactive session is a hub record
+operation, not a command to terminate Claude. Attachment storage in a hub-only
+scratchlist does not make native prompt attachments supported. UI hiding is
+capability presentation, not new authentication or authorization.
+
+## Known machine inventory and expiry
+
+`GET /api/machines` returns `{ machines: Machine[] }` for **all known machines
+in the authenticated namespace**, including offline devices and devices with
+zero sessions. Each entry retains the existing full machine shape, including
+`active: boolean` and numeric `activeAt` (last heartbeat; creation-time fallback
+for machines that have never heartbeated). The browser's existing JWT auth is
+unchanged. An empty inventory returns `{ "machines": [] }`.
+
+The existing five-second hub sweep marks a machine `active: false` after more
+than 45 seconds without a heartbeat. Expiry preserves the machine, its
+`activeAt`, and its stored record; it does **not** drop the device from this
+list or emit removal. Stored machines are reloaded after a hub restart, without
+requiring sessions. A stale stored active flag can briefly survive reload until
+the next expiry sweep. A machine only disappears from the cache if a refresh
+finds its stored record missing, not because it expired or has zero sessions.
+This change does not modify heartbeat persistence, retention or runner RPCs.
+
 ## Integration limits and worker handoff
 
-No web or auth files are changed. Worker A should use
-`metadata.version === "claude-http-v1"` to hide unsupported RPC controls:
-terminal, switch/abort, resume/reopen through a runner, file/git/upload tools,
-slash-command/model/permission/effort controls and queued cancellation/retry.
-These are not implemented by this HTTP transport. Existing UI grouping can use
+No web or auth files are changed. Worker A should hide the unsupported actions
+listed above for `metadata.version === "claude-http-v1"`. UI grouping can use
 `metadata.machineId` and `host`; do not require a runner-online machine entry
 to display external sessions. The normal session list, chat rows and composer
 use existing models. Worker B's Tailscale sign-in is independent of this API.
@@ -295,11 +335,9 @@ coordinator's mod must implement its own native prompt input and durable dedup
 ledger. No running service, database or installed release is modified by this
 worktree deliverable.
 
-Coordinator integration dependencies reported by the other workers: fresh
-browser device inventory needs all authorized known machines (including
-`active`/`activeAt`), while the existing `GET /api/machines` returns only online
-machines. That existing route is unchanged here. Worker B reports Tailscale
-production enablement still needs server-side Bun `requestIP` binding and a
+The coordinator's requested known-machine inventory follow-up is included.
+Worker B reports Tailscale production enablement still needs server-side Bun
+`requestIP` binding and a
 configuration/settings allowlist loader, outside B's current file ownership;
 its new auth endpoints default disabled pending integration. These are separate
 follow-ups, not prerequisites for the existing CLI-authenticated mod API.
