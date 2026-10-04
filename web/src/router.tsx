@@ -167,7 +167,7 @@ function SessionsPage() {
     const { addToast } = useToast()
     const { sessions, isLoading, error, refetch } = useSessions(api)
     const [initializedHub, setInitializedHub] = useState<string | null>(null)
-    const { machines } = useMachines(api, true)
+    const { machines } = useMachines(api, true, true)
     const handleRefresh = useCallback(() => {
         return (async () => {
             try {
