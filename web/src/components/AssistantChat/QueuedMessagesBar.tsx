@@ -199,6 +199,7 @@ export function QueuedMessagesBar({
     pendingScheduleRevision,
     onEdit,
     canSteer,
+    controlsDisabledReason,
 }: {
     sessionId: string
     api: ApiClient | null
@@ -218,6 +219,7 @@ export function QueuedMessagesBar({
      * as: pi flavor && session thinking && remote-controlled.
      */
     canSteer?: boolean
+    controlsDisabledReason?: string
 }) {
     const queued = useQueuedMessages(sessionId)
     const assistantApi = useAui()
@@ -352,7 +354,7 @@ export function QueuedMessagesBar({
                         const hasAttachments = attachmentNames.length > 0
                         const localId = msg.localId ?? msg.id
                         const isPending = cancelMutation.isPending || queuedOperationPending
-                        const canCancel = computeCanCancel({ id: msg.id, localId: msg.localId, isPending })
+                        const canCancel = !controlsDisabledReason && computeCanCancel({ id: msg.id, localId: msg.localId, isPending })
 
                         const handleCancel = () => {
                             if (!canCancel) return
@@ -551,7 +553,7 @@ export function QueuedMessagesBar({
                                         <button
                                             type="button"
                                             aria-label={t('queuedMessages.retryOutcome')}
-                                            title={t('queuedMessages.retryOutcome')}
+                                            title={controlsDisabledReason ?? t('queuedMessages.retryOutcome')}
                                             disabled={!canCancel || retryPending}
                                             onClick={handleRetry}
                                             onMouseDown={(e) => e.preventDefault()}
@@ -576,6 +578,7 @@ export function QueuedMessagesBar({
                                     <button
                                         type="button"
                                         aria-label="Edit queued message"
+                                        title={controlsDisabledReason}
                                         disabled={!canEdit}
                                         onClick={handleEdit}
                                         onMouseDown={(e) => e.preventDefault()}
@@ -599,6 +602,7 @@ export function QueuedMessagesBar({
                                     <button
                                         type="button"
                                         aria-label="Cancel queued message"
+                                        title={controlsDisabledReason}
                                         disabled={!canCancel}
                                         onClick={handleCancel}
                                         onMouseDown={(e) => e.preventDefault()}

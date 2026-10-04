@@ -95,6 +95,20 @@ describe('resolveSessionHeaderMachineLabel', () => {
 })
 
 describe('SessionHeader', () => {
+    it.each([true, false])('hides runner actions for an active=%s HTTP Claude session', active => {
+        const session = baseSession({ active, metadata: { flavor: 'claude', version: 'claude-http-v1', path: '/repo', host: 'host' } })
+        render(
+            <QueryClientProvider client={new QueryClient()}><ToastProvider><I18nProvider>
+                <SessionHeader session={session} onBack={vi.fn()} api={null}
+                    onToggleFiles={vi.fn()} onToggleTerminal={vi.fn()} canReopen />
+            </I18nProvider></ToastProvider></QueryClientProvider>
+        )
+        expect(screen.queryByRole('button', { name: /Files|Terminal/ })).toBeNull()
+        fireEvent.click(screen.getByRole('button', { name: /More/ }))
+        expect(screen.queryByRole('menuitem', { name: /Archive|Reopen|Resume/ })).toBeNull()
+        expect(screen.getByRole('menuitem', { name: /Rename/ })).toBeInTheDocument()
+    })
+
     it('does not offer manual Codex sync while the HAPI session is active', () => {
         const api = {
             getMachines: vi.fn().mockResolvedValue({ machines: [] }),

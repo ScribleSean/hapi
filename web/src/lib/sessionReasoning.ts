@@ -5,6 +5,7 @@ import { getCodexModelReasoningEfforts } from './codexModelCapabilities'
 import { parseCursorWireParams } from './cursorModelOptions'
 import { getClaudeComposerEffortOptions } from '@/components/AssistantChat/claudeEffortOptions'
 import { getPiThinkingLevelOptions } from '@/components/AssistantChat/piThinkingLevelOptions'
+import { isExternalClaudeSession } from './sessionTransport'
 
 export type ReasoningOption = { value: string | null; label: string; modelId?: string }
 export type ReasoningTarget = {
@@ -56,6 +57,7 @@ export async function loadReasoningTarget(api: ApiClient, summary: Pick<SessionS
     if (!supportedFlavors.has(target.flavor)) return unavailable('This harness does not expose a separate reasoning control.')
     try {
         const { session } = await api.getSession(summary.id)
+        if (isExternalClaudeSession(session.metadata)) return unavailable('HTTP Claude sessions do not support runner controls.')
         if (!session.active) return unavailable('Session disconnected.')
         if ((session.metadata?.flavor ?? 'claude') !== target.flavor) return unavailable('Harness changed. Refresh the picker.')
         target.model = session.model

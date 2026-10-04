@@ -613,14 +613,6 @@ export function useSSE(options: {
 
                 const nextMachines = previous.machines.slice()
                 const index = nextMachines.findIndex((item) => item.id === machine.id)
-                if (!machine.active) {
-                    if (index >= 0) {
-                        nextMachines.splice(index, 1)
-                        return { ...previous, machines: nextMachines }
-                    }
-                    return previous
-                }
-
                 if (index >= 0) {
                     nextMachines[index] = machine
                 } else {
@@ -777,7 +769,22 @@ export function useSSE(options: {
                 } else {
                     const patch = getMachinePatch(event.data)
                     if (patch?.active === false) {
-                        removeMachine(event.machineId)
+                        let patched = false
+                        queryClient.setQueryData<MachinesResponse | undefined>(queryKeys.machines, previous => {
+                            if (!previous) return previous
+                            if (!previous.machines.some(machine => machine.id === event.machineId)) return previous
+                            patched = true
+                            return {
+                                ...previous,
+                                machines: previous.machines.map(machine => machine.id === event.machineId ? {
+                                    ...machine,
+                                    active: false,
+                                    activeAt: patch.activeAt ?? machine.activeAt,
+                                    updatedAt: patch.updatedAt ?? machine.updatedAt,
+                                } : machine)
+                            }
+                        })
+                        if (!patched) queueMachinesInvalidation()
                     } else {
                         queueMachinesInvalidation()
                     }

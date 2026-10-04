@@ -28,6 +28,7 @@ import { CopyIcon, CheckIcon, WrapIcon } from '@/components/icons'
 import { useTranslation } from '@/lib/use-translation'
 import { useOptionalHappyChatContext } from '@/components/AssistantChat/context'
 import { decodeFilePathCandidateHref, decodeFilePathHref, remarkFilePathLinks } from '@/lib/remark-file-path-links'
+import { isExternalClaudeSession } from '@/lib/sessionTransport'
 import { classifyNoSchemeHref } from '@/lib/markdown-href-policy'
 import { remarkSessionPathLinks } from '@/lib/remark-session-path-links'
 import { buildSessionReferencePath, parseSessionPathHref } from '@/lib/sessionReference'
@@ -654,6 +655,9 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
         }
         const decision = classifyNoSchemeHref(filePath, { workspacePath: chat.metadata?.path, decodedPath: true })
         if (decision.action === 'file') {
+            if (isExternalClaudeSession(chat.metadata)) {
+                return <InertMarkdownHref href={filePath} className={props.className}>{props.children}</InertMarkdownHref>
+            }
             return <FilePathAnchor {...props} filePath={decision.path} sessionId={chat.sessionId} />
         }
         if (decision.action === 'details') {
@@ -696,7 +700,7 @@ function A(props: ComponentPropsWithoutRef<'a'>) {
             decodedPath: Boolean(candidatePath),
         })
         if (decision.action === 'file') {
-            if (!chat) {
+            if (!chat || isExternalClaudeSession(chat.metadata)) {
                 return <InertMarkdownHref href={href ?? windowsPathFromHref ?? ''} className={props.className}>{props.children}</InertMarkdownHref>
             }
             return <FilePathAnchor {...props} filePath={decision.path} sessionId={chat.sessionId} />

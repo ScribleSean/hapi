@@ -21,6 +21,7 @@ import { ImagePreview } from '@/components/ImagePreview'
 import { FileIcon } from '@/components/FileIcon'
 import { useTranslation } from '@/lib/use-translation'
 import { inlineMediaLabelKey, isInlineAudioMimeType, isInlineImageMimeType, isInlineVideoMimeType } from '@/lib/generatedInlineMedia'
+import { isExternalClaudeSession } from '@/lib/sessionTransport'
 
 function isToolCallBlock(value: unknown): value is ToolCallBlock {
     if (!isObject(value)) return false
@@ -82,7 +83,8 @@ export function GeneratedImageCard(props: { block: GeneratedImageBlock }) {
     const mediaLabel = t(inlineMediaLabelKey(props.block.mimeType))
     const mediaHeader = t('media.displayed.header', { label: mediaLabel, fileName: props.block.fileName })
     // Non-image media can be tens of MB; wait for explicit user intent before downloading.
-    const shouldFetch = isImage || loadMedia
+    const runnerControlsAvailable = !isExternalClaudeSession(ctx.metadata)
+    const shouldFetch = runnerControlsAvailable && (isImage || loadMedia)
 
     useEffect(() => {
         return () => {
@@ -143,7 +145,9 @@ export function GeneratedImageCard(props: { block: GeneratedImageBlock }) {
             <div className="mb-2 min-w-0 truncate text-xs font-medium text-[var(--app-hint)]">
                 {mediaHeader}
             </div>
-            {objectUrl ? (
+            {!runnerControlsAvailable ? (
+                <p className="text-xs text-[var(--app-hint)]">{t('session.external.controlsUnavailable')}</p>
+            ) : objectUrl ? (
                 isVideo ? (
                     <div className="flex min-h-32 min-w-[12rem] items-center justify-center rounded-xl bg-[var(--app-subtle-bg)]">
                         <video

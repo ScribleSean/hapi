@@ -21,6 +21,7 @@ import { useToast } from '@/lib/toast-context'
 import { queryKeys } from '@/lib/query-keys'
 import { markCodexSessionsImported } from '@/lib/codexImportedSessions'
 import { useMachines } from '@/hooks/queries/useMachines'
+import { isExternalClaudeSession } from '@/lib/sessionTransport'
 import { useMachineLabels } from '@/hooks/useMachineLabels'
 import { formatAbsoluteDateTime, formatRelativeTime } from '@/lib/relativeTime'
 import { useSessionHeaderMetadata } from '@/hooks/useSessionHeaderMetadata'
@@ -227,7 +228,9 @@ export function SessionHeader(props: {
     const { archiveSession, reopenSession, renameSession, suggestSessionTitle, updateSessionSummary, setPinMode, deleteSession, isPending } = useSessionActions(
         api,
         session.id,
-        session.metadata?.flavor ?? null
+        session.metadata?.flavor ?? null,
+        undefined,
+        session.metadata
     )
     const [reopenError, setReopenError] = useState<string | null>(null)
 
@@ -456,7 +459,7 @@ export function SessionHeader(props: {
                         </div>
                     </div>
 
-                    {props.onToggleFiles ? (
+                    {props.onToggleFiles && !isExternalClaudeSession(session.metadata) ? (
                         <button
                             type="button"
                             onClick={props.onToggleFiles}
@@ -482,7 +485,7 @@ export function SessionHeader(props: {
                         </button>
                     ) : null}
 
-                    {props.onToggleTerminal ? (
+                    {props.onToggleTerminal && !isExternalClaudeSession(session.metadata) ? (
                         <button
                             type="button"
                             onClick={props.onToggleTerminal}
@@ -525,8 +528,8 @@ export function SessionHeader(props: {
                 onExport={() => setExportOpen(true)}
                 onSyncCodex={api && codexSessionId && !session.active ? handleSyncCodex : undefined}
                 onSyncPi={api && piSessionId && !session.active ? handleSyncPi : undefined}
-                onArchive={() => setArchiveOpen(true)}
-                onReopen={props.canReopen === false ? undefined : handleReopen}
+                onArchive={isExternalClaudeSession(session.metadata) ? undefined : () => setArchiveOpen(true)}
+                onReopen={isExternalClaudeSession(session.metadata) || props.canReopen === false ? undefined : handleReopen}
                 reopenDisabledReason={props.reopenDisabledReason}
                 reopenHint={props.reopenHint}
                 onDelete={() => setDeleteOpen(true)}
@@ -553,8 +556,8 @@ export function SessionHeader(props: {
                 onClose={() => setRenameOpen(false)}
                 currentName={title}
                 onRename={renameSession}
-                onSuggestTitle={api && props.titleSuggestionAvailable ? suggestSessionTitle : undefined}
-                onUpdateSummary={api && props.titleSuggestionAvailable ? updateSessionSummary : undefined}
+                onSuggestTitle={api && props.titleSuggestionAvailable && !isExternalClaudeSession(session.metadata) ? suggestSessionTitle : undefined}
+                onUpdateSummary={api && props.titleSuggestionAvailable && !isExternalClaudeSession(session.metadata) ? updateSessionSummary : undefined}
                 isPending={isPending}
             />
 

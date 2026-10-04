@@ -21,7 +21,7 @@ type SessionActionMenuProps = {
     onMarkUnread?: () => void
     onSyncCodex?: () => void
     onSyncPi?: () => void
-    onArchive: () => void
+    onArchive?: () => void
     onReopen?: () => void
     reopenDisabledReason?: string
     /** Soft-fail tip when reopen is allowed but chat-store probe could not verify. */
@@ -237,7 +237,7 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
 
     const handleArchive = () => {
         onClose()
-        onArchive()
+        onArchive?.()
     }
 
     const handleReopen = () => {
@@ -386,7 +386,7 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                     </button>
                 ) : null}
 
-                {sessionActive ? (
+                {sessionActive && onArchive ? (
                     <button
                         type="button"
                         role="menuitem"

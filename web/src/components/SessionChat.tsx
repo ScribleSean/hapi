@@ -124,6 +124,7 @@ import { AgentTerminalView } from '@/components/AgentTerminal/AgentTerminalView'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { VoiceBackendSession, registerSessionStore, registerVoiceHooksStore, voiceHooks } from '@/realtime'
 import { isRemoteTerminalSupported } from '@/utils/terminalSupport'
+import { isExternalClaudeSession } from '@/lib/sessionTransport'
 import type { SessionAutoConnectStatus } from '@/hooks/useSessionAutoConnect'
 
 type SessionModelSelection = { provider: string; modelId: string } | string | null
@@ -481,10 +482,11 @@ export function ScratchlistDrawerHost(props: {
     ) => Promise<boolean | SendMessageAcceptance>
     onExitScratchlistMode: () => void
     disabled?: boolean
+    attachmentsDisabledReason?: string
 }) {
     const assistantApi = useAui()
     const handlePromoteToComposer = useCallback(async (entry: ScratchlistEntry) => {
-        if (props.disabled) return
+        if (props.disabled || (props.attachmentsDisabledReason && entry.attachments?.length)) return
         assistantApi.composer().setText(entry.text)
         // Exit scratchlist mode before rehydrating attachments so addAttachment
         // uses the normal chat upload adapter (not the scratchlist hub adapter).
@@ -499,9 +501,9 @@ export function ScratchlistDrawerHost(props: {
                 assistantApi.composer()
             )
         }
-    }, [assistantApi, props.api, props.disabled, props.onExitScratchlistMode, props.sessionId])
+    }, [assistantApi, props.api, props.disabled, props.attachmentsDisabledReason, props.onExitScratchlistMode, props.sessionId])
     const handlePromoteToQueue = useCallback(async (entry: ScratchlistEntry) => {
-        if (props.disabled) return false
+        if (props.disabled || (props.attachmentsDisabledReason && entry.attachments?.length)) return false
         let attachments: AttachmentMetadata[] | undefined
         if (entry.attachments && entry.attachments.length > 0) {
             attachments = await stageScratchlistAttachmentsForComposeSend(
@@ -517,7 +519,7 @@ export function ScratchlistDrawerHost(props: {
             props.onExitScratchlistMode()
         }
         return Boolean(accepted)
-    }, [props.api, props.disabled, props.onSend, props.onExitScratchlistMode, props.sessionId])
+    }, [props.api, props.disabled, props.attachmentsDisabledReason, props.onSend, props.onExitScratchlistMode, props.sessionId])
     return (
         <ScratchlistDrawer
             entries={props.entries}
@@ -528,6 +530,7 @@ export function ScratchlistDrawerHost(props: {
             onPromoteToComposer={handlePromoteToComposer}
             onPromoteToQueue={handlePromoteToQueue}
             disabled={props.disabled}
+            attachmentsDisabledReason={props.attachmentsDisabledReason}
         />
     )
 }
@@ -700,6 +703,7 @@ function SessionChatInner(props: SessionChatProps) {
         setRewindForkFallback(null)
     }, [onForkConversation, rewindForkFallback])
     const sessionInactive = !props.session.active
+    const runnerControlsAvailable = !isExternalClaudeSession(props.session.metadata)
     const inactiveCanResume = inactiveSessionCanResume(
         props.session,
         props.messages.length,
@@ -712,7 +716,7 @@ function SessionChatInner(props: SessionChatProps) {
     // misleadingly "connected" view. Matches the composer terminal button, which
     // is likewise gated on `session.active`.
     const canViewAgentTerminal =
-        props.session.metadata?.startingMode === 'pty' && props.session.active
+        terminalSupported && props.session.metadata?.startingMode === 'pty' && props.session.active
     const normalizedCacheRef = useRef<Map<string, { source: DecryptedMessage; normalized: NormalizedMessage | null }>>(new Map())
     const focusComposerRef = useRef<(() => void) | null>(null)
     const blocksByIdRef = useRef<Map<string, ChatBlock>>(new Map())
@@ -936,6 +940,7 @@ function SessionChatInner(props: SessionChatProps) {
             scheduledAt?: number | null,
             deliveryMode: MessageDeliveryMode = 'queue',
         ): Promise<{ attemptId: string | null } | false> => {
+            if (!runnerControlsAvailable && attachments?.length) return false
             if (
                 scratchlistMode
                 && scheduledAt == null
@@ -983,7 +988,7 @@ function SessionChatInner(props: SessionChatProps) {
                 }
                 return accepted
             }
-            if (!scratchlistMode && scheduledAt == null && !attachments?.length
+            if (runnerControlsAvailable && !scratchlistMode && scheduledAt == null && !attachments?.length
                 && props.session.metadata?.capabilities?.concurrentClients && /^\/(clear|new)\s*$/.test(text.trim())) {
                 const result = await props.api.clearConversation(props.session.id)
                 await navigate({ to: '/sessions/$sessionId', params: { sessionId: result.sessionId }, ...PRESERVE_SESSION_SIDEBAR_SCROLL })
@@ -991,7 +996,7 @@ function SessionChatInner(props: SessionChatProps) {
             }
             return props.onSend(text, attachments, scheduledAt, deliveryMode)
         },
-        [props.onSend, props.api, props.session.id, props.session.metadata?.capabilities?.concurrentClients, navigate, scratchlist, scratchlistMode],
+        [props.onSend, props.api, props.session.id, props.session.metadata?.capabilities?.concurrentClients, navigate, scratchlist, scratchlistMode, runnerControlsAvailable],
     )
     const agentFlavor = props.session.metadata?.flavor ?? null
     // The effort-options query is keyed by session only, so a stale option
@@ -1300,7 +1305,8 @@ function SessionChatInner(props: SessionChatProps) {
         props.api,
         props.session.id,
         agentFlavor,
-        codexCollaborationModeSupported
+        codexCollaborationModeSupported,
+        props.session.metadata
     )
 
     // Voice assistant integration
@@ -1313,15 +1319,17 @@ function SessionChatInner(props: SessionChatProps) {
             getSession: () => props.session as { agentState?: { requests?: Record<string, unknown> } } | null,
             sendMessage: (_sessionId: string, message: string) => props.onSend(message),
             approvePermission: async (_sessionId: string, requestId: string) => {
+                if (!runnerControlsAvailable) throw new Error(t('session.external.controlsUnavailable'))
                 await props.api.approvePermission(props.session.id, requestId)
                 props.onRefresh()
             },
             denyPermission: async (_sessionId: string, requestId: string) => {
+                if (!runnerControlsAvailable) throw new Error(t('session.external.controlsUnavailable'))
                 await props.api.denyPermission(props.session.id, requestId)
                 props.onRefresh()
             }
         })
-    }, [props.session, props.api, props.onSend, props.onRefresh])
+    }, [props.session, props.api, props.onSend, props.onRefresh, runnerControlsAvailable, t])
 
     useEffect(() => {
         registerVoiceHooksStore(
@@ -1700,15 +1708,17 @@ function SessionChatInner(props: SessionChatProps) {
 
     // Abort handler
     const handleAbort = useCallback(async () => {
+        if (!runnerControlsAvailable) return
         await abortSession()
         props.onRefresh()
-    }, [abortSession, props.onRefresh])
+    }, [abortSession, props.onRefresh, runnerControlsAvailable])
 
     // Switch to remote handler
     const handleSwitchToRemote = useCallback(async () => {
+        if (!runnerControlsAvailable) return
         await switchSession()
         props.onRefresh()
-    }, [switchSession, props.onRefresh])
+    }, [switchSession, props.onRefresh, runnerControlsAvailable])
 
     const handleToggleFiles = useCallback(() => {
         setOutlineOpen(false)
@@ -1845,6 +1855,7 @@ function SessionChatInner(props: SessionChatProps) {
     }, [agentFlavor, onSendForComposer, props.session.thinking, props.session.metadata, props.session.agentState?.steeringActive, controlledByUser, scratchlistMode, updatePendingSchedule])
 
     const attachmentAdapter = useMemo(() => {
+        if (!runnerControlsAvailable) return undefined
         if (props.session.active && scratchlistMode) {
             const adapter = createScratchlistAttachmentAdapter(props.api, props.session.id)
             scratchlistAdapterRef.current = adapter
@@ -1890,7 +1901,7 @@ function SessionChatInner(props: SessionChatProps) {
                 )
             },
         )
-    }, [props.api, props.session.id, props.session.active, props.resolveSessionIdForUpload, scratchlistMode, inactiveCanResume])
+    }, [props.api, props.session.id, props.session.active, props.resolveSessionIdForUpload, scratchlistMode, inactiveCanResume, runnerControlsAvailable])
 
 
     const runtime = useHappyRuntime({
@@ -1946,6 +1957,12 @@ function SessionChatInner(props: SessionChatProps) {
 
             <CursorMigrationBanner metadata={props.session.metadata} />
 
+            {!runnerControlsAvailable ? (
+                <div role="status" className="mx-3 mt-2 rounded-md bg-[var(--app-subtle-bg)] px-3 py-2 text-xs text-[var(--app-hint)]">
+                    {t('session.external.controlsUnavailable')}
+                </div>
+            ) : null}
+
             {sessionStatus ? <SessionStatusPanel data={sessionStatus} /> : null}
             {props.session.agentState?.codexHistorySync ? (
                 <div role="status" className="mx-3 mt-2 rounded-md bg-[var(--app-subtle-bg)] px-3 py-2 text-xs text-[var(--app-hint)]">
@@ -1967,7 +1984,7 @@ function SessionChatInner(props: SessionChatProps) {
                             <span>{props.autoConnectStatus.state === 'connecting'
                                 ? t('session.reconnect.connecting')
                                 : `${t('session.reconnect.unavailable')}: ${props.autoConnectStatus.message}`}</span>
-                            {props.autoConnectStatus.state === 'unavailable' && props.onRetryAutoConnect ? (
+                            {runnerControlsAvailable && props.autoConnectStatus.state === 'unavailable' && props.onRetryAutoConnect ? (
                                 <button
                                     type="button"
                                     className="rounded border border-[var(--app-border)] px-2 py-0.5 text-xs text-[var(--app-fg)] hover:bg-[var(--app-secondary-bg)]"
@@ -1988,7 +2005,7 @@ function SessionChatInner(props: SessionChatProps) {
             <AssistantRuntimeProvider runtime={runtime}>
                 <ShareSeedConsumer sessionId={props.session.id} sessionActive={props.session.active} />
                 <AbortRestoreConsumer messages={normalizedMessages} onAbortRestore={props.onAbortRestore ?? (() => {})} />
-                <DragDropZone disabled={(!props.session.active && !inactiveCanResume) || props.isSending || pendingSchedule != null || isScratchlistParking}>
+                <DragDropZone disabled={!runnerControlsAvailable || (!props.session.active && !inactiveCanResume) || props.isSending || pendingSchedule != null || isScratchlistParking}>
                     <div className="relative flex min-h-0 flex-1 flex-col">
                         {canViewAgentTerminal && (
                             // SessionChatInner is keyed by session.id, so switching sessions remounts this subtree.
@@ -2011,13 +2028,13 @@ function SessionChatInner(props: SessionChatProps) {
                         serviceTier={effectiveCodexServiceTier}
                         sessionId={props.session.id}
                         metadata={props.session.metadata}
-                        disabled={sessionInactive}
+                        disabled={sessionInactive || !runnerControlsAvailable}
                         onRefresh={props.onRefresh}
-                        onRetryMessage={props.onRetryMessage}
+                        onRetryMessage={runnerControlsAvailable ? props.onRetryMessage : undefined}
                         onContinuePlan={() => focusComposerRef.current?.()}
                         historyActionPending={historyActionPending}
-                        onForkConversation={controlledByUser ? undefined : onForkConversation}
-                        onRewindConversation={controlledByUser ? undefined : onRewindConversation}
+                        onForkConversation={controlledByUser || !runnerControlsAvailable ? undefined : onForkConversation}
+                        onRewindConversation={controlledByUser || !runnerControlsAvailable ? undefined : onRewindConversation}
                         isLatestCompletedBoundary={isLatestCompletedBoundary}
                         onViewModeChange={props.onViewModeChange}
                         isSyncingTail={props.isSyncingTail}
@@ -2071,6 +2088,7 @@ function SessionChatInner(props: SessionChatProps) {
                             {scratchlistMode ? (
                                 <ScratchlistDrawerHost
                                     sessionId={props.session.id}
+                                    attachmentsDisabledReason={runnerControlsAvailable ? undefined : t('session.external.controlsUnavailable')}
                                     api={props.api}
                                     entries={scratchlist.entries}
                                     onMove={scratchlist.move}
@@ -2081,6 +2099,7 @@ function SessionChatInner(props: SessionChatProps) {
                                 />
                             ) : null}
                             <QueuedMessagesBar
+                                controlsDisabledReason={runnerControlsAvailable ? undefined : t('session.external.controlsUnavailable')}
                                 sessionId={props.session.id}
                                 api={props.api}
                                 pendingSchedule={pendingSchedule}
@@ -2103,7 +2122,8 @@ function SessionChatInner(props: SessionChatProps) {
                         focusInputRef={focusComposerRef}
                         key={`composer-${props.session.id}`}
                         sessionId={props.session.id}
-                        canRestoreAttachments={props.session.active}
+                        canRestoreAttachments={runnerControlsAvailable && props.session.active}
+                        runnerControlsAvailable={runnerControlsAvailable}
                         onUploadDraftSnapshot={(text, attachments) => {
                             uploadDraftSnapshotRef.current = { text, attachments }
                         }}
@@ -2188,7 +2208,7 @@ function SessionChatInner(props: SessionChatProps) {
                                 : undefined
                         }
                         onPermissionModeChange={
-                            agentFlavor === 'copilot' && controlledByUser
+                            !runnerControlsAvailable || (agentFlavor === 'copilot' && controlledByUser)
                                 ? undefined
                                 : handlePermissionModeChange
                         }
@@ -2217,7 +2237,7 @@ function SessionChatInner(props: SessionChatProps) {
                                 : undefined
                         }
                         onModelChange={
-                            agentFlavor === 'codex'
+                            !runnerControlsAvailable ? undefined : agentFlavor === 'codex'
                                 ? (props.session.active && !controlledByUser && !codexModelsState.error ? handleModelChange : undefined)
                                 : agentFlavor === 'cursor'
                                     ? (props.session.active
@@ -2258,7 +2278,7 @@ function SessionChatInner(props: SessionChatProps) {
                                 : undefined
                         }
                         onEffortChange={
-                            agentFlavor === 'grok'
+                            !runnerControlsAvailable ? undefined : agentFlavor === 'grok'
                                 ? (props.session.active && !controlledByUser && grokEffortState.options.length > 0
                                     ? handleEffortChange
                                     : undefined)
@@ -2274,9 +2294,9 @@ function SessionChatInner(props: SessionChatProps) {
                                 ? handleServiceTierChange
                                 : undefined
                         }
-                        onSwitchToRemote={handleSwitchToRemote}
+                        onSwitchToRemote={runnerControlsAvailable ? handleSwitchToRemote : undefined}
                         onTerminal={props.session.active && terminalSupported ? handleViewTerminal : undefined}
-                        terminalUnsupported={props.session.active && !terminalSupported}
+                        terminalUnsupported={runnerControlsAvailable && props.session.active && !terminalSupported}
                         autocompleteSuggestions={props.autocompleteSuggestions}
                         voiceStatus={voice?.status}
                         voiceMicMuted={voice?.micMuted}

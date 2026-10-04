@@ -162,12 +162,17 @@ export function SessionRowSummary(props: {
     const attentionId = attentionTooltipIdProp ?? ownedIds.attentionId
     const scheduleId = scheduleTooltipIdProp ?? ownedIds.scheduleId
     const timeLabel = getSessionTimeLabel(s, t)
+    const flavor = s.metadata?.flavor?.trim().toLowerCase()
+    const providerLabel = flavor === 'claude' ? 'Claude' : flavor === 'codex' ? 'Codex' : null
 
     return (
         <div className={`flex w-full min-w-0 flex-col gap-1 ${className ?? ''}`}>
-            <div className={`grid grid-cols-[minmax(9rem,1fr)_minmax(0,max-content)] items-center gap-2 ${!s.active ? 'opacity-50' : ''}`}>
+            <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,max-content)] items-center gap-2">
                 <div className="flex min-w-0 items-center gap-2">
-                    <AgentFlavorIcon flavor={s.metadata?.flavor} className="h-4 w-4 shrink-0 -translate-y-px" />
+                    <span className="inline-flex shrink-0 items-center gap-1 rounded border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-1 py-0.5 text-[10px] font-medium text-[var(--app-fg)]">
+                        <AgentFlavorIcon flavor={s.metadata?.flavor} className="h-3.5 w-3.5 shrink-0" />
+                        {providerLabel ? <span>{providerLabel}</span> : null}
+                    </span>
                     <div
                         className={`min-w-0 flex-1 truncate text-sm font-medium ${s.active ? 'text-[var(--app-fg)]' : 'text-[var(--app-hint)]'}`}
                         title={sessionName}
