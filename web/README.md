@@ -195,6 +195,15 @@ The isolated harness UI fixture needs no hub or authentication. From `web/`, run
 390px and desktop layouts, offline-device filtering, and empty inventories.
 Set `PLAYWRIGHT_CHROME_PATH` to an existing Chrome/Chromium executable if needed.
 
+The HTTP Claude fixture also checks that phone-width transcript reading and text
+messaging work without runner controls. Sessions with `metadata.flavor: "claude"`
+and `metadata.version: "claude-http-v1"` do not offer terminal, lifecycle,
+configuration, slash/skill discovery, file access, uploads or queue controls.
+Hub-only rename, pin, export and text scratchlist actions remain available.
+File/terminal deep links are guarded before their RPC-backed children mount.
+Session summaries omit `version`, so Claude row menus fetch full session metadata
+on demand and withhold runner actions until it is known.
+
 End-to-end browser tests for the scratchlist component (real Chromium, real
 `inert` focus blocking, real localStorage round-trips) live at the repo root
 under `e2e/`:

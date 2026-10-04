@@ -48,3 +48,36 @@ test('keeps All and a single known device', async ({ page }) => {
     await expect(page.getByRole('button', { name: /All \(2\)/ })).toBeVisible()
     await expect(page.getByRole('button', { name: /Windows \(2\)/ })).toBeVisible()
 })
+
+test('HTTP Claude remains readable and sendable on phones without runner controls', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    const errors: string[] = []
+    page.on('pageerror', error => errors.push(error.message))
+    await page.goto('/e2e-fixtures/http-claude-fixture.html?thinking=1&capabilities=1')
+    await expect(page.getByText('Existing HTTP transcript remains readable.')).toBeVisible()
+    await expect(page.getByText(/HTTP Claude session: messaging only/)).toBeVisible()
+    for (const name of [/^Abort$/, /^Terminal$/, /^Files$/, /^Settings$/, /^Attach/]) {
+        await expect(page.getByRole('button', { name })).toHaveCount(0)
+    }
+    await page.getByRole('button', { name: /More/ }).click()
+    await expect(page.getByRole('menuitem', { name: /Archive|Reopen|Resume/ })).toHaveCount(0)
+    await page.keyboard.press('Escape')
+    await page.getByRole('textbox').fill('Send a normal prompt')
+    await page.getByRole('button', { name: /^Send$/ }).click()
+    await expect.poll(() => page.evaluate(() => window.fixturePrompts)).toEqual(['Send a normal prompt'])
+    await page.getByRole('textbox').fill('/clear')
+    await page.getByRole('button', { name: /^Send$/ }).click()
+    await expect.poll(() => page.evaluate(() => window.fixturePrompts)).toEqual(['Send a normal prompt', '/clear'])
+    await page.keyboard.press('Escape')
+    await page.keyboard.press('Control+m')
+    expect(await page.evaluate(() => window.fixtureCalls.filter(name => /abort|switch|setModel|setEffort|Permission|Slash|Skills|upload|resume|reopen|readSessionFile|Git|fork|rewind|clearConversation/i.test(name)))).toEqual([])
+    expect(errors).toEqual([])
+})
+
+test('native Claude retains its runner controls', async ({ page }) => {
+    await page.goto('/e2e-fixtures/http-claude-fixture.html?native=1')
+    await expect(page.getByRole('button', { name: /^Abort$/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: /^Settings$/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: /^Terminal$/ })).toBeVisible()
+    await expect(page.getByText(/HTTP Claude session: messaging only/)).toHaveCount(0)
+})
