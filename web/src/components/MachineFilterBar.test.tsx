@@ -113,10 +113,14 @@ describe('MachineFilterBar', () => {
         expect(mint.className).toContain('border')
     })
 
-    it('is hidden below the md breakpoint (mobile uses MachineFilterMenu)', () => {
+    it('stays visible with wrapping chips and touch targets at phone width', () => {
         renderBar()
 
-        expect(screen.getByRole('group', { name: 'Filter sessions by machine' }).className).toContain('max-md:hidden')
+        const bar = screen.getByRole('group', { name: 'Filter sessions by machine' })
+        expect(bar.className).not.toContain('hidden')
+        expect(bar).toHaveClass('flex-wrap', 'min-w-0')
+        expect(screen.getByRole('button', { name: /All/ })).toHaveClass('min-h-11')
+        expect(screen.getByRole('button', { name: /Mint/ })).toHaveClass('min-h-11')
     })
 })
 

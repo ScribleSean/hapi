@@ -99,6 +99,8 @@ export default {
   'sessions.group.new': 'New session in this directory',
   'sessions.machineFilter.label': 'Filter sessions by machine',
   'sessions.machineFilter.all': 'All',
+  'sessions.machineFilter.lastSeen': 'last seen {time}',
+  'sessions.machineFilter.lastSeenUnknown': 'last seen unknown',
   'codexSync.tooltip': 'Import sessions from Codex into Hapi',
   'codexSync.newSessionAction': 'Import Codex history',
   'codexSync.confirm.title': 'Import Codex sessions',

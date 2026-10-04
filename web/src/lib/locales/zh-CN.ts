@@ -97,6 +97,8 @@ export default {
   'sessions.group.new': '在此目录新建会话',
   'sessions.machineFilter.label': '按机器筛选会话',
   'sessions.machineFilter.all': '全部',
+  'sessions.machineFilter.lastSeen': '上次在线 {time}',
+  'sessions.machineFilter.lastSeenUnknown': '上次在线时间未知',
   'codexSync.tooltip': '从 Codex 导入会话到 Hapi',
   'codexSync.newSessionAction': '导入 Codex 历史',
   'codexSync.confirm.title': '导入 Codex 会话',

@@ -54,7 +54,8 @@ import { getWorktreeSessionLabel } from '@/lib/sessionWorktreeLabel'
 import { retargetSharePendingTransfer } from '@/lib/sharePendingState'
 import type { Machine } from '@/types/api'
 import { getMachinePlatform, presentMachineHealth } from '@/lib/machineHealth'
-import { MachineFilterBar, MachineFilterMenu } from '@/components/MachineFilterBar'
+import { MachineFilterBar } from '@/components/MachineFilterBar'
+import { getMachineTitle } from '@/hooks/useMachineLabels'
 import { useSessionListMachineFilter } from '@/hooks/useSessionListMachineFilter'
 import { useTransientScrollbar } from '@/hooks/useTransientScrollbar'
 import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
@@ -1270,6 +1271,9 @@ export function SessionList(props: {
         if (machineId && machineLabelsById[machineId]) {
             return machineLabelsById[machineId]
         }
+        if (machineId && machinesById[machineId]) {
+            return getMachineTitle(machinesById[machineId])
+        }
         if (machineId) {
             return machineId.slice(0, 8)
         }
@@ -1339,25 +1343,26 @@ export function SessionList(props: {
         [allGroups, machineLabelsById] // eslint-disable-line react-hooks/exhaustive-deps
     )
     const machineFilterItems = useMemo(
-        () => machineFilters.map((mg) => {
-            const machine = mg.machineId ? machinesById[mg.machineId] : undefined
-            return {
-                id: mg.machineId ?? UNKNOWN_MACHINE_ID,
-                label: mg.label,
-                sessionCount: mg.totalSessions,
-                healthPresentation: presentMachineHealth(
-                    machine?.health,
-                    getMachinePlatform(machine)
-                )
-            }
-        }),
-        [machineFilters, machinesById]
+        () => {
+            const counts = new Map(machineFilters.map(group => [group.machineId ?? UNKNOWN_MACHINE_ID, group.totalSessions]))
+            const ids = new Set([...counts.keys(), ...Object.keys(machinesById), ...Object.keys(machineLabelsById)])
+            return [...ids].map(id => {
+                const machine = machinesById[id]
+                return {
+                    id,
+                    label: resolveMachineLabel(id === UNKNOWN_MACHINE_ID ? null : id),
+                    sessionCount: counts.get(id) ?? 0,
+                    active: machine?.active,
+                    activeAt: machine?.activeAt,
+                    healthPresentation: presentMachineHealth(machine?.health, getMachinePlatform(machine))
+                }
+            })
+        },
+        [machineFilters, machinesById, machineLabelsById]
     )
-    const showMachineFilterBar = machineFilters.length >= 2
-    // A persisted filter whose machine no longer has sessions falls back to
-    // "All"; with at most one machine the bar is hidden and never filters.
-    const activeMachineFilter = showMachineFilterBar && machineFilter !== null
-        && machineFilters.some(mg => (mg.machineId ?? UNKNOWN_MACHINE_ID) === machineFilter)
+    const hasMultipleMachines = machineFilterItems.length >= 2
+    const activeMachineFilter = machineFilter !== null
+        && machineFilterItems.some(machine => machine.id === machineFilter)
         ? machineFilter
         : null
     // Unread after search/time, before machine scope — so machineFilters (from allSessions)
@@ -1606,7 +1611,7 @@ export function SessionList(props: {
     const renderActionOnlyGroupHeader = (group: SessionGroup) => {
         // With multiple machines in the unfiltered view, disambiguate
         // same-named directories by suffixing the machine label.
-        const groupTitle = showMachineFilterBar && activeMachineFilter === null
+        const groupTitle = hasMultipleMachines && activeMachineFilter === null
             ? `${group.displayName} · ${resolveMachineLabel(group.machineId)}`
             : group.displayName
         return (
@@ -1660,7 +1665,7 @@ export function SessionList(props: {
         const canStartInGroupDirectory = group.directory !== 'Other'
         // With multiple machines in the unfiltered view, disambiguate
         // same-named directories by suffixing the machine label.
-        const groupTitle = showMachineFilterBar && activeMachineFilter === null
+        const groupTitle = hasMultipleMachines && activeMachineFilter === null
             ? `${group.displayName} · ${resolveMachineLabel(group.machineId)}`
             : group.displayName
         return (
@@ -1952,14 +1957,6 @@ export function SessionList(props: {
                     {!(showSearch && searchExpanded) ? (
                         <>
                             <div className="flex-1" />
-                            {showMachineFilterBar ? (
-                                <MachineFilterMenu
-                                    machines={machineFilterItems}
-                                    totalCount={allSessions.length}
-                                    value={activeMachineFilter}
-                                    onChange={setMachineFilter}
-                                />
-                            ) : null}
                             {unreadSessionCount > 0 ? (
                                 <button
                                     type="button"
@@ -2011,14 +2008,12 @@ export function SessionList(props: {
                 </div>
             ) : null}
 
-            {showMachineFilterBar ? (
-                <MachineFilterBar
-                    machines={machineFilterItems}
-                    totalCount={allSessions.length}
-                    value={activeMachineFilter}
-                    onChange={setMachineFilter}
-                />
-            ) : null}
+            <MachineFilterBar
+                machines={machineFilterItems}
+                totalCount={allSessions.length}
+                value={activeMachineFilter}
+                onChange={setMachineFilter}
+            />
             </div>
 
             <div className="relative flex min-h-0 flex-1 flex-col">

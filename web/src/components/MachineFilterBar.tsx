@@ -12,9 +12,11 @@ export type MachineFilterItem = {
     label: string
     sessionCount: number
     healthPresentation: MachineHealthPresentation | null
+    active?: boolean
+    activeAt?: number
 }
 
-const chipBaseClass = 'flex h-7 shrink-0 items-center gap-1.5 rounded-full border px-2.5 text-xs transition-colors'
+const chipBaseClass = 'flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs transition-colors md:min-h-7'
 const chipSelectedClass = 'border-[var(--app-link)] bg-[var(--app-subtle-bg)] text-[var(--app-link)] font-medium'
 const chipIdleClass = 'border-[var(--app-border)] text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]'
 
@@ -43,8 +45,32 @@ function MachineFilterChip(props: {
     onSelect: (id: string) => void
 }) {
     const { machine, selected, onSelect } = props
+    const { t, locale } = useTranslation()
     const tooltipId = useId()
-    const hasHealth = machine.healthPresentation && machine.healthPresentation.metrics.length > 0
+    const offline = machine.active === false
+    const hasHealth = !offline && machine.healthPresentation && machine.healthPresentation.metrics.length > 0
+    const chipClass = selected ? chipSelectedClass : chipIdleClass
+    const stateClass = offline ? 'bg-[var(--app-secondary-bg)] text-[var(--app-hint)]' : ''
+    const lastSeen = machine.activeAt && Number.isFinite(machine.activeAt) && machine.activeAt > 0
+        ? new Date(machine.activeAt)
+        : null
+    const content = (
+        <span className="flex min-w-0 flex-col items-start">
+            <span className="flex items-center gap-1.5">
+                <span className="max-w-32 truncate">{machine.label}</span>
+                <span className="tabular-nums opacity-70">({machine.sessionCount})</span>
+            </span>
+            {offline ? (
+                <span className="text-[10px]">
+                    {t('misc.offline')} · {lastSeen ? (
+                        <time dateTime={lastSeen.toISOString()}>
+                            {t('sessions.machineFilter.lastSeen', { time: lastSeen.toLocaleString(locale, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) })}
+                        </time>
+                    ) : t('sessions.machineFilter.lastSeenUnknown')}
+                </span>
+            ) : null}
+        </span>
+    )
 
     // The button carries the pill's padding so the entire visible chip is
     // clickable; when a health popup wraps it, the wrapper only draws the border.
@@ -55,10 +81,9 @@ function MachineFilterChip(props: {
             aria-pressed={selected}
             aria-describedby={hasHealth ? tooltipId : undefined}
             title={machine.label}
-            className="flex h-7 min-w-0 items-center gap-1.5 rounded-full px-2.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+            className="flex min-h-11 min-w-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] md:min-h-7"
         >
-            <span className="max-w-32 truncate">{machine.label}</span>
-            <span className="tabular-nums opacity-70">({machine.sessionCount})</span>
+            {content}
         </button>
     )
 
@@ -69,10 +94,9 @@ function MachineFilterChip(props: {
                 onClick={() => onSelect(machine.id)}
                 aria-pressed={selected}
                 title={machine.label}
-                className={cn(chipBaseClass, selected ? chipSelectedClass : chipIdleClass)}
+                className={cn(chipBaseClass, chipClass, stateClass, 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]')}
             >
-                <span className="max-w-32 truncate">{machine.label}</span>
-                <span className="tabular-nums opacity-70">({machine.sessionCount})</span>
+                {content}
             </button>
         )
     }
@@ -105,7 +129,7 @@ export function MachineFilterBar(props: {
         <div
             role="group"
             aria-label={t('sessions.machineFilter.label')}
-            className="flex flex-wrap items-center gap-1.5 px-2 pb-2 max-md:hidden"
+            className="flex min-w-0 flex-wrap items-center gap-1.5 px-2 pb-2"
         >
             <button
                 type="button"
