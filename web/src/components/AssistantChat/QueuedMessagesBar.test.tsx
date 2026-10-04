@@ -96,6 +96,7 @@ function renderQueuedMessage(
     pendingScheduleRevision = 0,
     canSteer = false,
     api: ApiClient | null = null,
+    controlsDisabledReason?: string,
 ) {
     const onEdit = vi.fn()
     let currentPendingScheduleRevision = pendingScheduleRevision
@@ -114,6 +115,7 @@ function renderQueuedMessage(
                 pendingScheduleRevision={currentPendingScheduleRevision}
                 onEdit={onEdit}
                 canSteer={canSteer}
+                controlsDisabledReason={controlsDisabledReason}
             />
         </QueryClientProvider>
     )
@@ -131,6 +133,7 @@ function renderQueuedMessage(
                         pendingScheduleRevision={currentPendingScheduleRevision}
                         onEdit={onEdit}
                         canSteer={canSteer}
+                        controlsDisabledReason={controlsDisabledReason}
                     />
                 </QueryClientProvider>
             )
@@ -199,6 +202,32 @@ afterEach(() => {
 })
 
 describe('QueuedMessagesBar layout', () => {
+    it('disables retry-indeterminate with a reason for HTTP sessions', () => {
+        const reason = 'HTTP Claude sessions do not support runner controls.'
+        const retryIndeterminateMessage = vi.fn()
+        const view = renderQueuedMessage(null, null, 0, false, { retryIndeterminateMessage } as unknown as ApiClient, reason)
+        mocks.messageWindowState = { messages: [makeQueuedMessage(null, 'indeterminate', { deliveryState: 'indeterminate' })] }
+        view.rerender(null)
+        const retry = screen.getByRole('button', { name: 'queuedMessages.retryOutcome' })
+        expect(retry).toBeDisabled()
+        expect(retry).toHaveAttribute('title', reason)
+        fireEvent.click(retry)
+        expect(retryIndeterminateMessage).not.toHaveBeenCalled()
+    })
+    it('keeps queued text visible but disables runner queue operations with a reason', () => {
+        const reason = 'HTTP Claude sessions do not support runner controls.'
+        renderQueuedMessage(null, null, 0, true, null, reason)
+        for (const name of ['Edit queued message', 'Cancel queued message']) {
+            const button = screen.getByRole('button', { name })
+            expect(button).toBeDisabled()
+            expect(button).toHaveAttribute('title', reason)
+            fireEvent.click(button)
+        }
+        expect(screen.queryByRole('button', { name: 'Steer queued message' })).toBeNull()
+        expect(mocks.mutateAsync).not.toHaveBeenCalled()
+        expect(mocks.steerMessage).not.toHaveBeenCalled()
+    })
+
     it('keeps the queue footer flush with the composer area', () => {
         renderQueuedMessage()
 

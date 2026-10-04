@@ -57,6 +57,8 @@ import { getMachinePlatform, presentMachineHealth } from '@/lib/machineHealth'
 import { MachineFilterBar } from '@/components/MachineFilterBar'
 import { getMachineTitle } from '@/hooks/useMachineLabels'
 import { useSessionListMachineFilter } from '@/hooks/useSessionListMachineFilter'
+import { useSession } from '@/hooks/queries/useSession'
+import { isExternalClaudeSession } from '@/lib/sessionTransport'
 import { useTransientScrollbar } from '@/hooks/useTransientScrollbar'
 import { useCursorChatStoreStatus } from '@/hooks/queries/useCursorChatStoreStatus'
 import { SessionRowSummary } from '@/components/SessionRowSummary'
@@ -965,6 +967,9 @@ function SessionItem(props: {
     } = props
     const { haptic } = usePlatform()
     const [menuOpen, setMenuOpen] = useState(false)
+    const { session: actionSession } = useSession(api, menuOpen && s.metadata?.flavor === 'claude' ? s.id : null)
+    const runnerControlsAvailable = s.metadata?.flavor !== 'claude'
+        || (actionSession !== null && !isExternalClaudeSession(actionSession.metadata))
     const [menuAnchorPoint, setMenuAnchorPoint] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
     const [renameOpen, setRenameOpen] = useState(false)
     const [exportOpen, setExportOpen] = useState(false)
@@ -998,7 +1003,9 @@ function SessionItem(props: {
     const { archiveSession, reopenSession, renameSession, suggestSessionTitle, updateSessionSummary, deleteSession, setPinMode, isPending } = useSessionActions(
         api,
         s.id,
-        s.metadata?.flavor ?? null
+        s.metadata?.flavor ?? null,
+        undefined,
+        actionSession?.metadata
     )
     const [reopenError, setReopenError] = useState<string | null>(null)
 
@@ -1016,6 +1023,7 @@ function SessionItem(props: {
     }
 
     const handleReopen = async () => {
+        if (!runnerControlsAvailable) return
         setReopenError(null)
         try {
             const result = await reopenSession()
@@ -1105,8 +1113,8 @@ function SessionItem(props: {
                 onRename={() => setRenameOpen(true)}
                 onExport={() => setExportOpen(true)}
                 onMarkUnread={() => markSessionUnread(s.id, s.updatedAt)}
-                onArchive={() => setArchiveOpen(true)}
-                onReopen={cursorReopenDisabledReason ? undefined : handleReopen}
+                onArchive={runnerControlsAvailable ? () => setArchiveOpen(true) : undefined}
+                onReopen={!runnerControlsAvailable || cursorReopenDisabledReason ? undefined : handleReopen}
                 reopenDisabledReason={cursorReopenDisabledReason}
                 reopenHint={cursorReopenUnverifiedHint}
                 onDelete={() => setDeleteOpen(true)}
@@ -1133,8 +1141,8 @@ function SessionItem(props: {
                     onClose={() => setRenameOpen(false)}
                     currentName={sessionName}
                     onRename={renameSession}
-                    onSuggestTitle={api && titleSuggestionAvailable ? suggestSessionTitle : undefined}
-                    onUpdateSummary={api && titleSuggestionAvailable ? updateSessionSummary : undefined}
+                    onSuggestTitle={api && titleSuggestionAvailable && runnerControlsAvailable ? suggestSessionTitle : undefined}
+                    onUpdateSummary={api && titleSuggestionAvailable && runnerControlsAvailable ? updateSessionSummary : undefined}
                     isPending={isPending}
                 />
             ) : null}

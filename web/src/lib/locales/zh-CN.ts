@@ -99,6 +99,8 @@ export default {
   'sessions.machineFilter.all': '全部',
   'sessions.machineFilter.lastSeen': '上次在线 {time}',
   'sessions.machineFilter.lastSeenUnknown': '上次在线时间未知',
+  'session.external.controlsUnavailable': 'HTTP Claude 会话仅支持消息。运行器控制和文件访问不可用。',
+  'session.external.backToChat': '返回聊天',
   'codexSync.tooltip': '从 Codex 导入会话到 Hapi',
   'codexSync.newSessionAction': '导入 Codex 历史',
   'codexSync.confirm.title': '导入 Codex 会话',

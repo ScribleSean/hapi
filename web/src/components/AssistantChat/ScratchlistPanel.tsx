@@ -314,6 +314,7 @@ function ScratchlistInventory({
     sessionId,
     api,
     disabled = false,
+    attachmentsDisabledReason,
 }: {
     entries: ScratchlistEntry[]
     busyEntryId: string | null
@@ -324,6 +325,7 @@ function ScratchlistInventory({
     sessionId?: string
     api?: ApiClient
     disabled?: boolean
+    attachmentsDisabledReason?: string
 }) {
     const { t } = useTranslation()
     const { copiedEntryId, signalCopied } = useCopiedFeedback()
@@ -354,6 +356,7 @@ function ScratchlistInventory({
                 const isLast = index === entries.length - 1
                 const isBusy = busyEntryId === entry.id
                 const mutationsDisabled = disabled || isBusy
+                const promotionDisabledReason = entry.attachments?.length ? attachmentsDisabledReason : undefined
                 return (
                     <li
                         key={entry.id}
@@ -404,9 +407,9 @@ function ScratchlistInventory({
                             <button
                                 type="button"
                                 aria-label={t('scratchlist.action.promoteToComposer')}
-                                title={t('scratchlist.action.promoteToComposer')}
+                                title={promotionDisabledReason ?? t('scratchlist.action.promoteToComposer')}
                                 onClick={() => onPromoteToComposer(entry)}
-                                disabled={mutationsDisabled}
+                                disabled={mutationsDisabled || Boolean(promotionDisabledReason)}
                                 className="flex h-6 w-6 items-center justify-center rounded hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] disabled:cursor-not-allowed disabled:opacity-30"
                             >
                                 <PencilIcon />
@@ -414,9 +417,9 @@ function ScratchlistInventory({
                             <button
                                 type="button"
                                 aria-label={t('scratchlist.action.promoteToQueue')}
-                                title={t('scratchlist.action.promoteToQueue')}
+                                title={promotionDisabledReason ?? t('scratchlist.action.promoteToQueue')}
                                 onClick={() => onPromoteToQueue(entry)}
-                                disabled={mutationsDisabled}
+                                disabled={mutationsDisabled || Boolean(promotionDisabledReason)}
                                 className="flex h-6 w-6 items-center justify-center rounded hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] disabled:cursor-not-allowed disabled:opacity-30"
                             >
                                 <SendIcon />
@@ -475,6 +478,7 @@ export function ScratchlistDrawer({
     sessionId,
     api,
     disabled = false,
+    attachmentsDisabledReason,
 }: {
     entries: ScratchlistEntry[]
     onMove: (id: string, direction: 'up' | 'down') => void
@@ -484,6 +488,7 @@ export function ScratchlistDrawer({
     sessionId: string
     api: ApiClient
     disabled?: boolean
+    attachmentsDisabledReason?: string
 }) {
     const { t } = useTranslation()
     const [busyEntryId, setBusyEntryId] = useState<string | null>(null)
@@ -511,12 +516,12 @@ export function ScratchlistDrawer({
     }, [disabled, onMove])
 
     const handlePromoteToComposer = useCallback((entry: ScratchlistEntry) => {
-        if (disabled) return
+        if (disabled || (attachmentsDisabledReason && entry.attachments?.length)) return
         void onPromoteToComposer(entry)
-    }, [disabled, onPromoteToComposer])
+    }, [disabled, attachmentsDisabledReason, onPromoteToComposer])
 
     const handlePromoteToQueue = useCallback(async (entry: ScratchlistEntry) => {
-        if (disabled || busyEntryId) return
+        if (disabled || busyEntryId || (attachmentsDisabledReason && entry.attachments?.length)) return
         setBusyEntryId(entry.id)
         try {
             const accepted = await onPromoteToQueue(entry)
@@ -524,7 +529,7 @@ export function ScratchlistDrawer({
         } finally {
             setBusyEntryId(null)
         }
-    }, [busyEntryId, disabled, onDelete, onPromoteToQueue])
+    }, [busyEntryId, disabled, attachmentsDisabledReason, onDelete, onPromoteToQueue])
 
     return (
         <div className="mx-auto w-full max-w-content mb-1">
@@ -558,6 +563,7 @@ export function ScratchlistDrawer({
                         sessionId={sessionId}
                         api={api}
                         disabled={disabled}
+                        attachmentsDisabledReason={attachmentsDisabledReason}
                         onPromoteToComposer={handlePromoteToComposer}
                         onPromoteToQueue={handlePromoteToQueue}
                         onDelete={handleDelete}

@@ -101,6 +101,8 @@ export default {
   'sessions.machineFilter.all': 'All',
   'sessions.machineFilter.lastSeen': 'last seen {time}',
   'sessions.machineFilter.lastSeenUnknown': 'last seen unknown',
+  'session.external.controlsUnavailable': 'HTTP Claude session: messaging only. Runner controls and file access are unavailable.',
+  'session.external.backToChat': 'Back to chat',
   'codexSync.tooltip': 'Import sessions from Codex into Hapi',
   'codexSync.newSessionAction': 'Import Codex history',
   'codexSync.confirm.title': 'Import Codex sessions',

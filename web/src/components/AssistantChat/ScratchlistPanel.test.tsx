@@ -377,6 +377,30 @@ describe('ScratchlistPanel', () => {
 })
 
 describe('ScratchlistDrawer disabled operations', () => {
+    it('keeps text and bookkeeping available but blocks attachment promotion for HTTP sessions', async () => {
+        const { ScratchlistDrawer } = await import('./ScratchlistPanel')
+        const onPromoteToComposer = vi.fn()
+        const onPromoteToQueue = vi.fn(async () => true)
+        const onMove = vi.fn()
+        const reason = 'HTTP sessions accept text only.'
+        const attachedEntry = makeEntry({ id: 'attached', attachments: [{ id: 'file', filename: 'note.txt', mimeType: 'text/plain', size: 1, path: 'scratchlist:file' }] })
+        const textEntry = makeEntry({ id: 'text', text: 'Plain text' })
+        render(<I18nProvider><ScratchlistDrawer entries={[attachedEntry, textEntry]} sessionId={SID} api={{} as never}
+            onMove={onMove} onDelete={vi.fn()} onPromoteToComposer={onPromoteToComposer} onPromoteToQueue={onPromoteToQueue}
+            attachmentsDisabledReason={reason} /></I18nProvider>)
+        const composerButtons = screen.getAllByRole('button', { name: 'Copy into composer' })
+        const queueButtons = screen.getAllByRole('button', { name: 'Send to queue' })
+        expect(composerButtons[0]).toBeDisabled()
+        expect(queueButtons[0]).toBeDisabled()
+        expect(queueButtons[0]).toHaveAttribute('title', reason)
+        fireEvent.click(queueButtons[0])
+        expect(onPromoteToQueue).not.toHaveBeenCalled()
+        expect(composerButtons[1]).not.toBeDisabled()
+        fireEvent.click(composerButtons[1])
+        expect(onPromoteToComposer).toHaveBeenCalledWith(textEntry)
+        fireEvent.click(screen.getAllByRole('button', { name: 'Move entry down' })[0])
+        expect(onMove).toHaveBeenCalledWith('attached', 'down')
+    })
     it('disables and synchronously ignores move, delete, and promote actions while the parent send is pending', async () => {
         const { ScratchlistDrawer } = await import('./ScratchlistPanel')
         const entry = makeEntry({ id: 'pending-entry', text: 'held message' })

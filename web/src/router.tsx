@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
     Navigate,
@@ -20,6 +20,8 @@ import {
 import { App } from '@/App'
 import { SessionChat } from '@/components/SessionChat'
 import { SessionList } from '@/components/SessionList'
+import { SessionRunnerGate } from '@/components/SessionRunnerGate'
+import { isExternalClaudeSession } from '@/lib/sessionTransport'
 import { NewSession } from '@/components/NewSession'
 import { WorkspaceBrowser } from '@/components/WorkspaceBrowser'
 import { ProjectHome, PROJECT_AGENTS, type ProjectAgent } from '@/components/ProjectHome'
@@ -606,7 +608,9 @@ function SessionPage() {
         && hasResumableNativeIdentity
         && inactiveSessionCanResume(session, messages.length, cursorChatStoreStatus?.onDisk)
     )
-    const autoConnectUnavailableMessage = !owningMachineId
+    const autoConnectUnavailableMessage = isExternalClaudeSession(session?.metadata)
+        ? t('session.external.controlsUnavailable')
+        : !owningMachineId
         ? t('session.reconnect.machineUnknown')
         : !owningMachineOnline
             ? t('session.reconnect.machineOffline')
@@ -707,13 +711,14 @@ function SessionPage() {
 
     // Get agent type from session metadata for slash commands
     const agentType = session?.metadata?.flavor ?? 'claude'
+    const externalSession = isExternalClaudeSession(session?.metadata)
     const {
         commands: slashCommands,
         getSuggestions: getSlashSuggestions,
-    } = useSlashCommands(api, sessionId, agentType)
+    } = useSlashCommands(session && !externalSession ? api : null, session && !externalSession ? sessionId : null, agentType)
     const {
         getSuggestions: getSkillSuggestions,
-    } = useSkills(api, sessionId)
+    } = useSkills(session && !externalSession ? api : null, session && !externalSession ? sessionId : null)
     // Mention pool is stricter than sidebar (#1506): titled sessions only; match via sessionMatchesQuery.
     const { sessions: allSessions } = useSessions(api)
     const { machines: mentionMachines } = useMachines(api, true)
@@ -777,8 +782,10 @@ function SessionPage() {
             return [...sessionHits, ...fileHits]
         }
         if (query.startsWith('$')) {
+            if (externalSession) return []
             return await getSkillSuggestions(query)
         }
+        if (externalSession) return []
         return await getSlashSuggestions(query)
     }, [
         agentType,
@@ -788,6 +795,7 @@ function SessionPage() {
         resolveMentionMachineLabel,
         getSkillSuggestions,
         getSlashSuggestions,
+        externalSession,
     ])
 
     const refreshSelectedSession = useCallback(async () => {
@@ -869,7 +877,7 @@ function SessionPage() {
             onViewModeChange={setViewMode}
             onRetryMessage={retryMessage}
             autocompleteSuggestions={getAutocompleteSuggestions}
-            availableSlashCommands={slashCommands}
+            availableSlashCommands={externalSession ? [] : slashCommands}
             sendError={sendError}
             onClearSendError={clearSendError}
             onSuppressSendErrorRestore={suppressSendErrorRestore}
@@ -1128,6 +1136,20 @@ const sessionDetailRoute = createRoute({
     component: SessionDetailRoute,
 })
 
+function RunnerSessionRoute(props: { children: ReactNode }) {
+    const { api } = useAppContext()
+    const { sessionId } = useParams({ from: '/sessions/$sessionId' })
+    const { session, error } = useSession(api, sessionId)
+    const navigate = useNavigate()
+    const { t } = useTranslation()
+    if (!session) return <LoadingState label={error ?? t('misc.loading')} />
+    return (
+        <SessionRunnerGate session={session} onBack={() => void navigate({ to: '/sessions/$sessionId', params: { sessionId } })}>
+            {props.children}
+        </SessionRunnerGate>
+    )
+}
+
 const sessionFilesRoute = createRoute({
     getParentRoute: () => sessionDetailRoute,
     path: 'files',
@@ -1147,13 +1169,13 @@ const sessionFilesRoute = createRoute({
             ...(query ? { query } : {}),
         }
     },
-    component: FilesPage,
+    component: () => <RunnerSessionRoute><FilesPage /></RunnerSessionRoute>,
 })
 
 const sessionTerminalRoute = createRoute({
     getParentRoute: () => sessionDetailRoute,
     path: 'terminal',
-    component: TerminalPage,
+    component: () => <RunnerSessionRoute><TerminalPage /></RunnerSessionRoute>,
 })
 
 type SessionFileSearch = {
@@ -1201,7 +1223,7 @@ const sessionFileRoute = createRoute({
         }
         return result
     },
-    component: FilePage,
+    component: () => <RunnerSessionRoute><FilePage /></RunnerSessionRoute>,
 })
 
 type NewSessionSearch = {

@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
 import type { SessionSummary } from '@/types/api'
+import type { ApiClient } from '@/api/client'
 import { I18nProvider } from '@/lib/i18n-context'
 import { ToastProvider } from '@/lib/toast-context'
 import { SessionList } from './SessionList'
@@ -49,7 +50,7 @@ function renderWithProviders(children: ReactNode) {
         }
     })
 
-    return render(
+    const view = render(
         <QueryClientProvider client={queryClient}>
             <ToastProvider>
                 <I18nProvider>
@@ -58,6 +59,7 @@ function renderWithProviders(children: ReactNode) {
             </ToastProvider>
         </QueryClientProvider>
     )
+    return { queryClient, ...view }
 }
 
 describe('SessionList directory action', () => {
@@ -319,6 +321,27 @@ describe('SessionList time filter', () => {
 })
 
 describe('SessionList action menu parity', () => {
+    it.each(['claude-http-v1', 'native'])('uses full Claude metadata before offering runner actions (%s)', async version => {
+        const summary = makeSession({ id: 'claude-menu', active: true, metadata: { flavor: 'claude', path: '/repo', name: 'Claude menu' } })
+        let resolveDetail: (response: unknown) => void = () => {}
+        const getSession = vi.fn(() => new Promise(resolve => { resolveDetail = resolve }))
+        const api = { getSession } as unknown as ApiClient
+        const view = renderWithProviders(<SessionList sessions={[summary]} selectedSessionId={null} onSelect={vi.fn()} onNewSession={vi.fn()}
+            onRefresh={vi.fn()} isLoading={false} renderHeader={false} api={api} />)
+        expect(getSession).not.toHaveBeenCalled()
+        const row = screen.getAllByRole('button', { name: /Claude menu/ }).find(button => button.hasAttribute('data-session-scroll-anchor'))!
+        fireEvent.contextMenu(row)
+        expect(screen.queryByRole('menuitem', { name: 'Archive' })).toBeNull()
+        await waitFor(() => expect(getSession).toHaveBeenCalledWith('claude-menu'))
+        resolveDetail({ session: { ...summary, metadata: { ...summary.metadata, version } } })
+        await waitFor(() => expect(view.queryClient.getQueryState(['session', 'claude-menu'])?.status).toBe('success'))
+        await waitFor(() => {
+            if (version === 'native') expect(screen.getByRole('menuitem', { name: 'Archive' })).toBeInTheDocument()
+            else expect(screen.queryByRole('menuitem', { name: 'Archive' })).toBeNull()
+        })
+        expect(screen.getByRole('menuitem', { name: 'Rename' })).toBeInTheDocument()
+        expect(screen.getByRole('menuitem', { name: 'Export conversation' })).toBeInTheDocument()
+    })
     it.each([
         ['running', true],
         ['closed', false]

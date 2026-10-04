@@ -7,6 +7,7 @@ import { encodeBase64 } from '@/lib/utils'
 
 const mocks = vi.hoisted(() => ({
     navigate: vi.fn(),
+    metadata: null as { flavor: string; version: string; path: string } | null,
 }))
 
 vi.mock('@tanstack/react-router', () => ({
@@ -14,7 +15,7 @@ vi.mock('@tanstack/react-router', () => ({
 }))
 
 vi.mock('@/components/AssistantChat/context', () => ({
-    useOptionalHappyChatContext: () => ({ sessionId: 'session-1' }),
+    useOptionalHappyChatContext: () => ({ sessionId: 'session-1', metadata: mocks.metadata }),
 }))
 
 const AnchorComponent = (defaultComponents as Record<string, unknown>).a as React.ComponentType<
@@ -35,9 +36,18 @@ function renderFileAnchor(filePath: string) {
 
 beforeEach(() => {
     mocks.navigate.mockReset()
+    mocks.metadata = null
 })
 
 describe('chat file anchors', () => {
+    it('keeps HTTP-session file paths readable without opening runner previews', () => {
+        mocks.metadata = { flavor: 'claude', version: 'claude-http-v1', path: '/repo' }
+        renderFileAnchor('/repo/file.md')
+        expect(screen.queryByRole('link', { name: '/repo/file.md' })).toBeNull()
+        fireEvent.click(screen.getByText('/repo/file.md'))
+        expect(mocks.navigate).not.toHaveBeenCalled()
+    })
+
     it('marks file previews as originating from chat for deterministic back navigation', () => {
         const filePath = 'docs/guide.md'
         renderFileAnchor(filePath)

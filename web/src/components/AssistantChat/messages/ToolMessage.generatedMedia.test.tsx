@@ -10,6 +10,7 @@ function renderCard(options: {
     mimeType: string | null
     locale?: 'en' | 'zh-CN'
     getGeneratedImageBlob?: ReturnType<typeof vi.fn>
+    external?: boolean
 }) {
     if (options.locale) {
         localStorage.setItem('hapi-lang', options.locale)
@@ -22,7 +23,7 @@ function renderCard(options: {
     const value: HappyChatContextValue = {
         api,
         sessionId: 'session-1',
-        metadata: null,
+        metadata: options.external ? { flavor: 'claude', version: 'claude-http-v1', host: 'host', path: '/repo' } : null,
         terminalToolDisplayMode: 'compact',
         showSessionSummaryInChat: false,
         disabled: false,
@@ -55,6 +56,13 @@ function renderCard(options: {
 }
 
 describe('GeneratedImageCard video fetch', () => {
+    it.each(['image/png', 'video/mp4', 'application/octet-stream'])('does not retrieve native media for external Claude (%s)', async mimeType => {
+        const { getGeneratedImageBlob } = renderCard({ mimeType, external: true })
+        expect(screen.getByText(/HTTP Claude session: messaging only/)).toBeInTheDocument()
+        expect(screen.queryByRole('button')).toBeNull()
+        await Promise.resolve()
+        expect(getGeneratedImageBlob).not.toHaveBeenCalled()
+    })
     it('labels displayed images in English without implying AI generation', () => {
         renderCard({ mimeType: 'image/png', locale: 'en' })
 
