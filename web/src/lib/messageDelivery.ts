@@ -45,10 +45,12 @@ export function resolveMessageDeliveryMode(input: {
     agentFlavor: string | null | undefined
     isSessionThinking: boolean
     canSteer?: boolean
+    /** HTTP Claude decides at arrival, even if the UI's thinking flag is stale. */
+    automaticallySteers?: boolean
     intent: ComposerSendIntent
     scheduledAt?: number | null
     routesToScratchlist?: boolean
 }): MessageDeliveryMode {
-    return input.canSteer && input.isSessionThinking && input.intent === 'default'
+    return (input.automaticallySteers || (input.canSteer && input.isSessionThinking)) && input.intent === 'default'
         && input.scheduledAt == null && !input.routesToScratchlist ? 'steer' : 'queue'
 }

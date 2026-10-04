@@ -288,6 +288,7 @@ export function HappyComposer(props: {
     canRestoreAttachments?: boolean
     disabled?: boolean
     runnerControlsAvailable?: boolean
+    automaticallySteers?: boolean
     permissionMode?: PermissionMode
     collaborationMode?: CodexCollaborationMode
     copilotAgentMode?: CopilotAgentMode
@@ -2323,6 +2324,11 @@ export function HappyComposer(props: {
                             </div>
                         ) : null}
 
+                        {props.automaticallySteers ? (
+                            <p className="px-4 pt-2 text-xs text-[var(--app-hint)]">
+                                {t('session.external.automaticSteering')}
+                            </p>
+                        ) : null}
                         <div className={`flex px-4 py-3 ${
                             isExpanded ? 'min-h-0 flex-1 items-stretch' : 'items-center'
                         }`}>

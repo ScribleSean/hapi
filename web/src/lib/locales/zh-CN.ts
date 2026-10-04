@@ -1,4 +1,8 @@
 export default {
+  'session.external.automaticSteering': '发送会将消息加入当前运行的轮次；排队会等待下一轮。无需 /steer。',
+  'queuedMessages.pendingDelivery': '等待发送',
+  'queuedMessages.awaitingAcknowledgment': '等待确认',
+  'queuedMessages.waitingForNextTurn': '等待下一轮',
   // Loading states
   'loading': '加载中…',
   'authorizing': '认证中…',

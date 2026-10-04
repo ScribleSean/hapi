@@ -33,7 +33,9 @@ function comparePosition(a: MessagePosition, b: MessagePosition): number {
 }
 
 function isWebVisibleStoredMessage(message: StoredMessageForDelivery): boolean {
-    return !isRedundantGoalStatusEventContent(message.content)
+    const record = unwrapRoleWrappedRecordEnvelope(message.content)
+    return !(record?.role === 'user' && isObject(record.meta) && record.meta.isTranscriptEcho === true)
+        && !isRedundantGoalStatusEventContent(message.content)
 }
 
 function toDecryptedMessage(message: StoredMessageForDelivery): DecryptedMessage {
@@ -120,6 +122,11 @@ function getNormalizedDeliveryMode(
     requestedDeliveryMode: MessageDeliveryMode | undefined,
     scheduledAt: number | null | undefined
 ): MessageDeliveryMode {
+    if (isObject(metadata) && metadata.flavor === 'claude' && metadata.version === 'claude-http-v1') {
+        // The add-on decides whether a turn is running at arrival. Preserve
+        // explicit Queue and schedules rather than relying on stale heartbeats.
+        return requestedDeliveryMode !== 'queue' && scheduledAt == null ? 'steer' : 'queue'
+    }
     if (requestedDeliveryMode !== 'steer' || scheduledAt != null) {
         return 'queue'
     }

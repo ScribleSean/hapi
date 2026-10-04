@@ -157,6 +157,7 @@ function ComposerHarness(props: {
     initialText: string
     initialSchedule?: PendingSchedule | null
     piRunning?: boolean
+    automaticallySteers?: boolean
     controls: { current: HarnessControls | null }
 }) {
     const [snapshot, setSnapshot] = useState<FakeRuntimeState>(() => ({
@@ -222,6 +223,7 @@ function ComposerHarness(props: {
     return (
         <I18nProvider>
             <HappyComposer
+                automaticallySteers={props.automaticallySteers}
                 key={composerKey}
                 sessionId={composerKey}
                 disabled={isSending}
@@ -306,6 +308,10 @@ function input(): HTMLTextAreaElement {
 }
 
 describe('HappyComposer send-error atomic restore', () => {
+    it('explains automatic steering for HTTP Claude without requiring a slash command', () => {
+        render(<ComposerHarness initialText="" controls={{ current: null }} automaticallySteers />)
+        expect(screen.getByText('Send adds your message to the running turn. Queue waits for the next turn. No /steer needed.')).toBeTruthy()
+    })
     afterEach(() => {
         cleanup()
         runtime.setSnapshot = null

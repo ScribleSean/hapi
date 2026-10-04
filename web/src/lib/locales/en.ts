@@ -1,4 +1,8 @@
 export default {
+  'session.external.automaticSteering': 'Send adds your message to the running turn. Queue waits for the next turn. No /steer needed.',
+  'queuedMessages.pendingDelivery': 'Pending delivery',
+  'queuedMessages.awaitingAcknowledgment': 'Awaiting acknowledgment',
+  'queuedMessages.waitingForNextTurn': 'Waiting for the next turn',
   'settings.display.botsView': 'Bots view',
   'settings.display.botsView.desc': 'One list of named bots, pinned first. Turn off to show project folders.',
   // Loading states

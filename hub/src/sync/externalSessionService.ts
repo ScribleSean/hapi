@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto'
+import { unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
+import { isObject } from '@hapi/protocol'
 import type { Metadata, Session } from '@hapi/protocol/types'
 import type { Store } from '../store'
 import { ImportedMessageConflictError } from '../store/messages'
@@ -157,6 +159,14 @@ export class ExternalSessionService {
             return this.store.messages.getUninvokedLocalMessages(sessionId, { deliverableOnly: true })
                 .filter(message => message.scheduledAt === null || message.scheduledAt <= Date.now())
                 .slice(0, limit)
+                .map(message => {
+                    const meta = unwrapRoleWrappedRecordEnvelope(message.content)?.meta
+                    return {
+                        ...message,
+                        deliveryMode: message.scheduledAt == null && isObject(meta) && meta.deliveryMode === 'steer'
+                            ? 'steer' as const : 'queue' as const
+                    }
+                })
         }
         const messages = read()
         if (messages.length > 0 || waitMs === 0 || signal.aborted) return messages

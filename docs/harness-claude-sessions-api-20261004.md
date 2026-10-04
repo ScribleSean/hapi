@@ -184,6 +184,7 @@ type InboundResponse = {
         createdAt: number
         invokedAt: null
         scheduledAt: number | null
+        deliveryMode: 'steer' | 'queue'
     }>
 }
 ```
@@ -193,6 +194,22 @@ Returns unacknowledged, deliverable user prompts in ascending sequence order.
 Future scheduled prompts and indeterminate/dispatching rows are withheld.
 Mature scheduled prompts become eligible. Timeout returns `{ "messages": [] }`.
 No sequence cursor is necessary: acknowledged messages leave this durable queue.
+
+`deliveryMode` is explicit for each inbound row. Normal Send (including callers
+omitting the mode) uses `steer`: the add-on folds it into a running turn at
+arrival, or starts a turn when idle. Explicit Queue and all scheduled messages
+use `queue`: the add-on must wait for its running turn to finish before applying
+and acknowledging them. A mature schedule is eligible for polling, but must
+still not steer. Use the add-on's current turn state, not a delayed hub heartbeat.
+Persisted rows created before this distinction with `meta.deliveryMode: 'queue'`
+remain queued. Polling does not rewrite their intent. Repeated polls and a hub
+restart preserve the same mode and localId.
+
+The web composer consumes literal `/steer` locally without sending it. The hub
+also treats that literal command as a no-op for this transport. Ordinary sends
+appear under Pending delivery until acknowledged; they do not need a second
+command. Prompt rows marked `meta.isTranscriptEcho: true` stay in storage but
+are excluded from history and web rendering.
 
 **Long-poll rather than SSE** keeps the mod HTTP-only without requiring a stream
 parser, has a bounded request lifetime, and lets ordinary retries recover the

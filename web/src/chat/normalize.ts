@@ -1,5 +1,5 @@
 import { unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
-import { safeStringify } from '@hapi/protocol'
+import { isObject, safeStringify } from '@hapi/protocol'
 import type { DecryptedMessage } from '@/types/api'
 import type { NormalizedMessage } from '@/chat/types'
 import { isCodexContent, isSkippableAgentContent, normalizeAgentRecord } from '@/chat/normalizeAgent'
@@ -21,6 +21,9 @@ export function normalizeDecryptedMessage(message: DecryptedMessage): Normalized
     }
 
     if (record.role === 'user') {
+        // The canonical hub input is already present; a native prompt echo
+        // is retained in storage but must not appear as a second user message.
+        if (isObject(record.meta) && record.meta.isTranscriptEcho === true) return null
         const normalized = normalizeUserRecord(message.id, message.localId, message.createdAt, record.content, record.meta)
         return normalized
             ? { ...normalized, status: message.status, originalText: message.originalText, invokedAt: message.invokedAt, steered: message.steered }

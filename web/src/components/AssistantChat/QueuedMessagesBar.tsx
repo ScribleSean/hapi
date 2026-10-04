@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'r
 import type { ApiClient } from '@/api/client'
 import { getMessageWindowState, subscribeMessageWindow } from '@/lib/message-window-store'
 import { isQueuedForInvocation } from '@/lib/messages'
+import { isObject } from '@hapi/protocol'
 import { EMPTY_STATE } from '@/hooks/queries/useMessages'
 import { normalizeDecryptedMessage } from '@/chat/normalize'
 import type { DecryptedMessage } from '@/types/api'
@@ -199,6 +200,7 @@ export function QueuedMessagesBar({
     pendingScheduleRevision,
     onEdit,
     canSteer,
+    automaticallySteers,
     controlsDisabledReason,
 }: {
     sessionId: string
@@ -219,6 +221,7 @@ export function QueuedMessagesBar({
      * as: pi flavor && session thinking && remote-controlled.
      */
     canSteer?: boolean
+    automaticallySteers?: boolean
     controlsDisabledReason?: string
 }) {
     const queued = useQueuedMessages(sessionId)
@@ -341,14 +344,15 @@ export function QueuedMessagesBar({
             <div className="px-3 pb-0 pt-2 text-sm text-[var(--app-fg-muted)]">
                 <div className="flex items-center gap-1.5 mb-1.5 text-xs font-medium text-[var(--app-hint)]">
                     <ClockIcon />
-                    <span>Queued</span>
+                    <span>{automaticallySteers ? t('queuedMessages.pendingDelivery') : 'Queued'}</span>
                 </div>
                 <ul
                     className="flex flex-col gap-1.5 max-h-32 sm:max-h-48 overflow-y-auto"
-                    aria-label="Queued messages"
+                    aria-label={automaticallySteers ? t('queuedMessages.pendingDelivery') : 'Queued messages'}
                 >
                     {queued.map((msg) => {
                         const preview = getQueuedMessagePreview(msg)
+                        const meta = normalizeDecryptedMessage(msg)?.meta
                         const { text, attachmentNames } = preview
                         const editText = getQueuedMessageEditText(preview)
                         const hasAttachments = attachmentNames.length > 0
@@ -523,6 +527,13 @@ export function QueuedMessagesBar({
                                     {msg.deliveryState === 'indeterminate' ? (
                                         <div className="mt-1 text-xs text-[var(--app-warning-text)]">
                                             {t('queuedMessages.steerOutcomeUnknown')}
+                                        </div>
+                                    ) : null}
+                                    {automaticallySteers && msg.scheduledAt == null && msg.deliveryState !== 'indeterminate' ? (
+                                        <div className="mt-1 text-xs text-[var(--app-hint)]">
+                                            {t(isObject(meta) && meta.deliveryMode === 'steer'
+                                                ? 'queuedMessages.awaitingAcknowledgment'
+                                                : 'queuedMessages.waitingForNextTurn')}
                                         </div>
                                     ) : null}
                                     {hasAttachments ? (

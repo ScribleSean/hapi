@@ -71,6 +71,46 @@ afterEach(() => {
 })
 
 describe('external Claude HTTP sessions', () => {
+    it('preserves normal Send versus explicit Queue and mature schedules in inbound delivery', async () => {
+        const { request, register, engine, store } = setup()
+        const session = await register()
+        const send = `/api/sessions/${session.id}/messages`
+        for (const [localId, deliveryMode] of [['default', undefined], ['steer', 'steer'], ['queue', 'queue']] as const) {
+            expect((await request(send, { text: localId, localId, deliveryMode })).status).toBe(200)
+        }
+        await engine.sendMessage(session.id, { text: 'scheduled', localId: 'scheduled', scheduledAt: Date.now() - 1 })
+        const path = `/cli/external-sessions/${session.id}/inbound?waitMs=0`
+        const rows = (await (await request(path)).json() as { messages: { localId: string; deliveryMode: string }[] }).messages
+        expect(rows.map(({ localId, deliveryMode }) => [localId, deliveryMode])).toEqual([
+            ['default', 'steer'], ['steer', 'steer'], ['queue', 'queue'], ['scheduled', 'queue']
+        ])
+        const reloaded = makeEngine(store, [])
+        expect((await reloaded.externalSessions.inbound(session.id, 'default', 0, 100, new AbortController().signal))
+            .map(({ localId, deliveryMode }) => [localId, deliveryMode])).toEqual(rows.map(({ localId, deliveryMode }) => [localId, deliveryMode]))
+    })
+
+    it('treats literal steer as a no-op without adding an inbound row', async () => {
+        const { request, register, store } = setup()
+        const session = await register()
+        expect((await request(`/api/sessions/${session.id}/messages`, { text: ' /steer\n' })).status).toBe(200)
+        expect(store.messages.countMessages(session.id)).toBe(0)
+    })
+
+    it('hides transcript echoes in history while retaining the canonical delivered prompt', async () => {
+        const { request, register, store, engine } = setup()
+        const session = await register()
+        await request(`/api/sessions/${session.id}/messages`, { text: 'Continue', localId: 'echo-test' })
+        await request(`/cli/external-sessions/${session.id}/inbound/ack`, { localIds: ['echo-test'] })
+        await request(`/cli/external-sessions/${session.id}/messages`, { messages: [{
+            clientMessageId: 'prompt-echo', createdAt: Date.now(),
+            content: { role: 'user', content: { type: 'text', text: 'Continue' }, meta: { isTranscriptEcho: true } }
+        }] })
+        const visible = engine.getMessagesPage(session.id, { limit: 50 }).messages
+        expect(visible).toHaveLength(1)
+        expect(visible[0].localId).toBe('echo-test')
+        expect(visible[0].invokedAt).not.toBeNull()
+        expect(store.messages.countMessages(session.id)).toBe(2)
+    })
     it('registers and upserts one ordinary Claude session with the right machine', async () => {
         const { register, engine, events } = setup()
         const session = await register()

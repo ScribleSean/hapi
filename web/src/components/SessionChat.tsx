@@ -124,7 +124,7 @@ import { AgentTerminalView } from '@/components/AgentTerminal/AgentTerminalView'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { VoiceBackendSession, registerSessionStore, registerVoiceHooksStore, voiceHooks } from '@/realtime'
 import { isRemoteTerminalSupported } from '@/utils/terminalSupport'
-import { isExternalClaudeSession } from '@/lib/sessionTransport'
+import { isExternalClaudeSession, isExternalClaudeSteerCommand } from '@/lib/sessionTransport'
 import type { SessionAutoConnectStatus } from '@/hooks/useSessionAutoConnect'
 
 type SessionModelSelection = { provider: string; modelId: string } | string | null
@@ -940,6 +940,9 @@ function SessionChatInner(props: SessionChatProps) {
             scheduledAt?: number | null,
             deliveryMode: MessageDeliveryMode = 'queue',
         ): Promise<{ attemptId: string | null } | false> => {
+            if (isExternalClaudeSteerCommand(props.session.metadata, text, attachments?.length)) {
+                return { attemptId: null }
+            }
             if (!runnerControlsAvailable && attachments?.length) return false
             if (
                 scratchlistMode
@@ -996,7 +999,7 @@ function SessionChatInner(props: SessionChatProps) {
             }
             return props.onSend(text, attachments, scheduledAt, deliveryMode)
         },
-        [props.onSend, props.api, props.session.id, props.session.metadata?.capabilities?.concurrentClients, navigate, scratchlist, scratchlistMode, runnerControlsAvailable],
+        [props.onSend, props.api, props.session.id, props.session.metadata, navigate, scratchlist, scratchlistMode, runnerControlsAvailable],
     )
     const agentFlavor = props.session.metadata?.flavor ?? null
     // The effort-options query is keyed by session only, so a stale option
@@ -1821,6 +1824,7 @@ function SessionChatInner(props: SessionChatProps) {
         const routedToScratchlist = shouldRouteToScratchlist(scratchlistMode, attachments, scheduledAt)
         const deliveryMode = resolveMessageDeliveryMode({
             agentFlavor,
+            automaticallySteers: isExternalClaudeSession(props.session.metadata),
             canSteer: canSteerSessionSend({
                 agentFlavor,
                 metadata: props.session.metadata,
@@ -2099,6 +2103,7 @@ function SessionChatInner(props: SessionChatProps) {
                                 />
                             ) : null}
                             <QueuedMessagesBar
+                                automaticallySteers={isExternalClaudeSession(props.session.metadata)}
                                 controlsDisabledReason={runnerControlsAvailable ? undefined : t('session.external.controlsUnavailable')}
                                 sessionId={props.session.id}
                                 api={props.api}
@@ -2119,6 +2124,7 @@ function SessionChatInner(props: SessionChatProps) {
                         </div>
 
                         <HappyComposer
+                        automaticallySteers={isExternalClaudeSession(props.session.metadata)}
                         focusInputRef={focusComposerRef}
                         key={`composer-${props.session.id}`}
                         sessionId={props.session.id}

@@ -143,6 +143,14 @@ export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ error: 'Message requires text or attachments' }, 400)
         }
 
+        // HTTP Claude handles normal sends on arrival; /steer is only a no-op.
+        if (sessionResult.session.metadata?.flavor === 'claude'
+            && sessionResult.session.metadata.version === 'claude-http-v1'
+            && parsed.data.text.trim() === '/steer'
+            && !parsed.data.attachments?.length) {
+            return c.json({ ok: true })
+        }
+
         // Older peer MCP/CLI clients send only { text }. Assign an identity at
         // ingress so native echoes reconcile with this row instead of creating
         // a second user message. Keep caller IDs for idempotent retries.

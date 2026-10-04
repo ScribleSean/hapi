@@ -97,6 +97,7 @@ function renderQueuedMessage(
     canSteer = false,
     api: ApiClient | null = null,
     controlsDisabledReason?: string,
+    automaticallySteers = false,
 ) {
     const onEdit = vi.fn()
     let currentPendingScheduleRevision = pendingScheduleRevision
@@ -116,6 +117,7 @@ function renderQueuedMessage(
                 onEdit={onEdit}
                 canSteer={canSteer}
                 controlsDisabledReason={controlsDisabledReason}
+                automaticallySteers={automaticallySteers}
             />
         </QueryClientProvider>
     )
@@ -134,6 +136,7 @@ function renderQueuedMessage(
                         onEdit={onEdit}
                         canSteer={canSteer}
                         controlsDisabledReason={controlsDisabledReason}
+                        automaticallySteers={automaticallySteers}
                     />
                 </QueryClientProvider>
             )
@@ -802,6 +805,31 @@ describe('formatScheduledTime', () => {
         const crossYearDate = new Date(nextYear, 0, 15, 10, 30) // Jan 15 next year
         const result = formatScheduledTime(crossYearDate.getTime())
         expect(result).toContain(String(nextYear))
+    })
+})
+
+describe('HTTP Claude pending delivery', () => {
+    it('shows automatic delivery until acknowledgment then removes the pending row', () => {
+        const view = renderQueuedMessage(null, null, 0, false, null, 'Runner controls unavailable', true)
+        mocks.messageWindowState = { messages: [makeQueuedMessage(null, 'http-send', {
+            content: { role: 'user', content: { type: 'text', text: 'Continue' }, meta: { deliveryMode: 'steer' } },
+        })] }
+        view.rerender(null)
+        expect(screen.getByRole('list', { name: 'queuedMessages.pendingDelivery' })).toBeTruthy()
+        expect(screen.getByText('queuedMessages.awaitingAcknowledgment')).toBeTruthy()
+        expect(screen.queryByTitle('queuedMessages.steer')).toBeNull()
+
+        // The messages-consumed SSE stamps the original row, without needing
+        // an assistant reply or waiting for the running turn to end.
+        mocks.messageWindowState = { messages: [makeQueuedMessage(null, 'http-send', { invokedAt: 2000, status: 'sent' })] }
+        view.rerender(null)
+        expect(screen.queryByRole('list')).toBeNull()
+    })
+
+    it('labels explicit Queue as waiting for the next turn', () => {
+        renderQueuedMessage(null, null, 0, false, null, 'Runner controls unavailable', true)
+        expect(screen.getByText('queuedMessages.waitingForNextTurn')).toBeTruthy()
+        expect(screen.queryByText('queuedMessages.awaitingAcknowledgment')).toBeNull()
     })
 })
 

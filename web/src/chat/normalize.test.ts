@@ -13,6 +13,14 @@ function makeMessage(content: unknown): DecryptedMessage {
 }
 
 describe('normalizeDecryptedMessage', () => {
+    it('hides marked prompt echoes without deduplicating legitimate repeated messages', () => {
+        const canonical = { role: 'user', content: { type: 'text', text: 'Continue' }, meta: { sentFrom: 'webapp' } }
+        expect(normalizeDecryptedMessage(makeMessage(canonical))?.role).toBe('user')
+        expect(normalizeDecryptedMessage(makeMessage({ ...canonical, meta: { sentFrom: 'cli', isTranscriptEcho: true } }))).toBeNull()
+        expect(normalizeDecryptedMessage(makeMessage({ message: { ...canonical, meta: { isTranscriptEcho: true } } }))).toBeNull()
+        expect(normalizeDecryptedMessage(makeMessage({ ...canonical, meta: { isTranscriptEcho: false } }))?.role).toBe('user')
+        expect(normalizeDecryptedMessage(makeMessage({ ...canonical, meta: { isTranscriptEcho: 'true' } }))?.role).toBe('user')
+    })
     it('drops unsupported Claude system output records', () => {
         const message = makeMessage({
             role: 'agent',

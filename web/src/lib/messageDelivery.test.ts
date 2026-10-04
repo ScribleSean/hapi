@@ -64,6 +64,14 @@ describe('resolveMessageDeliveryMode', () => {
 
 
 describe('default steering', () => {
+    it('lets HTTP Claude decide at arrival while preserving explicit queue, schedules and scratchlist', () => {
+        const http = { agentFlavor: 'claude', isSessionThinking: false, automaticallySteers: true, intent: 'default' as const }
+        expect(resolveMessageDeliveryMode(http)).toBe('steer')
+        expect(resolveMessageDeliveryMode({ ...http, isSessionThinking: true })).toBe('steer')
+        expect(resolveMessageDeliveryMode({ ...http, intent: 'queue' })).toBe('queue')
+        expect(resolveMessageDeliveryMode({ ...http, scheduledAt: 123 })).toBe('queue')
+        expect(resolveMessageDeliveryMode({ ...http, routesToScratchlist: true })).toBe('queue')
+    })
     const active = { agentFlavor: 'codex', isSessionThinking: true, canSteer: true, intent: 'default' as const }
     it('steers a normal send to an active capable session', () => {
         expect(resolveMessageDeliveryMode(active)).toBe('steer')
