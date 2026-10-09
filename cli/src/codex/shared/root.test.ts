@@ -327,6 +327,143 @@ describe('shared steering availability', () => {
         await vi.waitFor(() => expect((f.state() as Record<string, unknown>).codexHistorySync).toBeNull());
     });
 
+    it('refreshes a stale cached turn from the bounded native history head before steering', async () => {
+        const f = await fixture();
+        await f.root.activate();
+        f.user()?.({ content: { text: 'queued steering input' } }, 'queued-steering');
+        await vi.waitFor(() => expect(f.native.queue).toHaveLength(1));
+        f.native.notify('turn/started', { threadId: 'thread', turn: { id: 'stale-active' } });
+        f.native.thread.turns = [{ id: 'actual-active', status: 'inProgress', items: [] }];
+        const request = f.root.client.request.bind(f.root.client);
+        const spy = vi.spyOn(f.root.client, 'request').mockImplementation(async (method, params) => {
+            if (method === 'thread/queue/delete') {
+                const queuedSubmissionId = (params as { queuedSubmissionId?: string }).queuedSubmissionId;
+                f.native.queue = f.native.queue.filter(entry => entry.id !== queuedSubmissionId);
+                return { deleted: true };
+            }
+            if (method === 'turn/steer') return {};
+            return request(method, params);
+        });
+
+        expect(await f.rpc.get(RPC_METHODS.SteerQueuedMessage)!({ localId: 'queued-steering' })).toEqual({ steered: true });
+        const steerCalls = spy.mock.calls.filter(([method]) => method === 'turn/steer');
+        expect(steerCalls).toHaveLength(1);
+        expect(steerCalls[0][1]).toMatchObject({ expectedTurnId: 'actual-active' });
+        const headCalls = spy.mock.calls.filter(([method]) => method === 'thread/turns/list');
+        expect(headCalls).toHaveLength(1);
+        expect(headCalls[0][1]).toEqual({ threadId: 'thread', sortDirection: 'desc', itemsView: 'notLoaded', limit: 1 });
+    });
+
+    it('keeps a newer native turn notification that arrives while reading the history head', async () => {
+        const f = await fixture();
+        await f.root.activate();
+        f.user()?.({ content: { text: 'queued steering input' } }, 'newer-turn');
+        await vi.waitFor(() => expect(f.native.queue).toHaveLength(1));
+        f.native.notify('turn/started', { threadId: 'thread', turn: { id: 'old-active' } });
+        f.native.thread.turns = [{ id: 'old-active', status: 'inProgress', items: [] }];
+        const request = f.root.client.request.bind(f.root.client);
+        let release!: () => void;
+        const blocked = new Promise<void>(resolve => { release = resolve; });
+        let reading!: () => void;
+        const started = new Promise<void>(resolve => { reading = resolve; });
+        const spy = vi.spyOn(f.root.client, 'request').mockImplementation(async (method, params) => {
+            const result = method === 'thread/queue/delete' ? (() => {
+                const queuedSubmissionId = (params as { queuedSubmissionId?: string }).queuedSubmissionId;
+                f.native.queue = f.native.queue.filter(entry => entry.id !== queuedSubmissionId);
+                return { deleted: true };
+            })() : method === 'turn/steer' ? {} : await request(method, params);
+            if (method === 'thread/turns/list') { reading(); await blocked; }
+            return result;
+        });
+
+        const steering = f.rpc.get(RPC_METHODS.SteerQueuedMessage)!({ localId: 'newer-turn' });
+        await started;
+        f.native.notify('turn/started', { threadId: 'thread', turn: { id: 'new-active' } });
+        release();
+        await expect(steering).resolves.toEqual({ steered: true });
+        expect(spy.mock.calls.find(([method]) => method === 'turn/steer')?.[1]).toMatchObject({ expectedTurnId: 'new-active' });
+    });
+
+    it('does not steer when completion arrives while reading the history head', async () => {
+        const f = await fixture();
+        await f.root.activate();
+        f.native.notify('turn/started', { threadId: 'thread', turn: { id: 'old-active' } });
+        f.native.thread.turns = [{ id: 'old-active', status: 'inProgress', items: [] }];
+        const request = f.root.client.request.bind(f.root.client);
+        let release!: () => void;
+        const blocked = new Promise<void>(resolve => { release = resolve; });
+        let reading!: () => void;
+        const started = new Promise<void>(resolve => { reading = resolve; });
+        const spy = vi.spyOn(f.root.client, 'request').mockImplementation(async (method, params) => {
+            const result = await request(method, params);
+            if (method === 'thread/turns/list') { reading(); await blocked; }
+            return result;
+        });
+
+        const steering = f.rpc.get(RPC_METHODS.SteerQueuedMessage)!({ localId: 'not-queued' });
+        await started;
+        f.native.notify('turn/completed', { threadId: 'thread', turn: { id: 'old-active', status: 'completed' } });
+        release();
+        await expect(steering).resolves.toEqual({ steered: false, error: 'No active turn' });
+        expect(spy.mock.calls.some(([method]) => method === 'turn/steer')).toBe(false);
+    });
+
+    it('waits behind already scheduled queue ingress before reading the history head', async () => {
+        const f = await fixture();
+        await f.root.activate();
+        f.native.notify('turn/started', { threadId: 'thread', turn: { id: 'active' } });
+        f.native.thread.turns = [{ id: 'active', status: 'inProgress', items: [] }];
+        const request = f.root.client.request.bind(f.root.client);
+        let release!: () => void;
+        const blocked = new Promise<void>(resolve => { release = resolve; });
+        let adding!: () => void;
+        const addStarted = new Promise<void>(resolve => { adding = resolve; });
+        const spy = vi.spyOn(f.root.client, 'request').mockImplementation(async (method, params) => {
+            if (method === 'thread/queue/add') { adding(); await blocked; }
+            if (method === 'thread/queue/delete') {
+                const queuedSubmissionId = (params as { queuedSubmissionId?: string }).queuedSubmissionId;
+                f.native.queue = f.native.queue.filter(entry => entry.id !== queuedSubmissionId);
+                return { deleted: true };
+            }
+            if (method === 'turn/steer') return {};
+            return request(method, params);
+        });
+
+        f.user()?.({ content: { text: 'queued steering input' } }, 'pending-ingress');
+        await addStarted;
+        const steering = f.rpc.get(RPC_METHODS.SteerQueuedMessage)!({ localId: 'pending-ingress' });
+        await Promise.resolve();
+        expect(spy.mock.calls.some(([method]) => method === 'thread/turns/list')).toBe(false);
+        release();
+        await expect(steering).resolves.toEqual({ steered: true });
+        expect(spy.mock.calls.some(([method]) => method === 'thread/turns/list')).toBe(true);
+    });
+
+    it('does not automatically repeat a rejected steer after refreshing the history head', async () => {
+        const f = await fixture();
+        await f.root.activate();
+        f.user()?.({ content: { text: 'queued steering input' } }, 'rejected-steer');
+        await vi.waitFor(() => expect(f.native.queue).toHaveLength(1));
+        f.native.thread.turns = [{ id: 'actual-active', status: 'inProgress', items: [] }];
+        const request = f.root.client.request.bind(f.root.client);
+        const spy = vi.spyOn(f.root.client, 'request').mockImplementation(async (method, params) => {
+            if (method === 'thread/queue/delete') {
+                const queuedSubmissionId = (params as { queuedSubmissionId?: string }).queuedSubmissionId;
+                f.native.queue = f.native.queue.filter(entry => entry.id !== queuedSubmissionId);
+                return { deleted: true };
+            }
+            if (method === 'turn/steer') throw new Error('expected active turn id mismatch');
+            return request(method, params);
+        });
+
+        await expect(f.rpc.get(RPC_METHODS.SteerQueuedMessage)!({ localId: 'rejected-steer' })).resolves.toMatchObject({ steered: false });
+        expect(spy.mock.calls.filter(([method]) => method === 'thread/turns/list')).toHaveLength(1);
+        expect(spy.mock.calls.filter(([method]) => method === 'turn/steer')).toHaveLength(1);
+        expect(f.native.queue).toEqual([{
+            id: 'queued-0', clientUserMessageId: 'rejected-steer', input: [{ type: 'text', text: 'queued steering input' }]
+        }]);
+    });
+
     it('uses metadata-only resume before replaying bounded history after transport loss', async () => {
         const f = await fixture();
         const request = vi.spyOn(f.root.client, 'request');
