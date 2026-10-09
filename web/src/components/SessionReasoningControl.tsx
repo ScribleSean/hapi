@@ -276,11 +276,12 @@ function BotSettingsDialog({
       }}
     >
       <DialogContent
-        className="max-h-[85dvh] overflow-y-auto"
+        className="flex max-h-[min(85dvh,calc(var(--app-viewport-height,100dvh)-24px))] flex-col gap-0 overflow-hidden p-0"
         onPointerDownOutside={(event) => {
           if (busy) event.preventDefault();
         }}
       >
+        <div className="shrink-0 px-4 pt-4">
         <DialogHeader>
           <DialogTitle>
             {bulk
@@ -418,7 +419,12 @@ function BotSettingsDialog({
                 {resultText}
               </p>
             )}
-            <ul className="max-h-[38dvh] space-y-2 overflow-y-auto py-2">
+          </>
+        )}
+        </div>
+        {!loading ? (
+          <>
+            <ul className="min-h-0 flex-1 space-y-2 overflow-y-auto px-4 py-2">
               {visible.map((target) => {
                 const outcome = results?.find(
                   (result) => result.id === target.id,
@@ -426,9 +432,11 @@ function BotSettingsDialog({
                 const current =
                   tab === "reasoning"
                     ? reasoningLabel((target as ReasoningTarget).current)
-                    : (target as ServiceTierTarget).current === "fast"
-                      ? "Fast"
-                      : "Standard";
+                    : flavor(target) !== "codex"
+                      ? "Not exposed"
+                      : (target as ServiceTierTarget).current === "fast"
+                        ? "Fast"
+                        : "Standard";
                 const detail =
                   target.unavailable ??
                   (supports(target)
@@ -476,7 +484,8 @@ function BotSettingsDialog({
                 );
               })}
             </ul>
-            <div className="mt-3 flex justify-end gap-2">
+            <div className="shrink-0 border-t border-[var(--app-divider)] px-4 py-3">
+              <div className="flex justify-end gap-2">
               <button
                 type="button"
                 disabled={busy}
@@ -495,16 +504,17 @@ function BotSettingsDialog({
                       !capabilityOptions.has(reasoningValue))
                   }
                   onClick={() => void apply()}
-                  className="rounded bg-[var(--app-link)] px-3 py-2 text-sm text-white disabled:opacity-40"
+                  className="rounded bg-[var(--app-button)] px-3 py-2 text-sm text-[var(--app-button-text)] disabled:opacity-40"
                 >
                   {busy
                     ? "Applying…"
                     : `Apply to ${eligible.length} bot${eligible.length === 1 ? "" : "s"}`}
                 </button>
               ) : null}
+              </div>
             </div>
           </>
-        )}
+        ) : null}
       </DialogContent>
     </Dialog>
   );
