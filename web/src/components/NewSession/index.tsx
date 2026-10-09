@@ -40,7 +40,7 @@ import {
     saveNewSessionFormDraft,
     shouldRestoreNewSessionFormDraft
 } from './newSessionFormDraft'
-import { isOpencodeReasoningEffortValid } from './types'
+import { isOpencodeReasoningEffortValid, MODEL_OPTIONS, CLAUDE_EFFORT_OPTIONS } from './types'
 import type { AgentType, LaunchEffort, CodexReasoningEffort, NewSessionServiceTier, SessionType } from './types'
 import { ActionButtons } from './ActionButtons'
 import { AgentSelector } from './AgentSelector'
@@ -54,6 +54,8 @@ import { CopilotAgentModeSelector } from './CopilotAgentModeSelector'
 import { FastModeSelector } from './FastModeSelector'
 import { MachineSelector } from './MachineSelector'
 import { ModelSelector } from './ModelSelector'
+import { TaskAutoPicker } from './TaskAutoPicker'
+import type { TaskPickOption } from '@/lib/taskPicker'
 import { OpencodeModelSelector } from './OpencodeModelSelector'
 import { EffortField } from './EffortField'
 import { shouldEnableOpencodeModelDiscovery } from './opencodeModelsGate'
@@ -147,6 +149,7 @@ export function NewSession(props: {
     const [isPiImportDialogOpen, setIsPiImportDialogOpen] = useState(false)
     const piLoadGenerationRef = useRef(0)
     const [isCreating, setIsCreating] = useState(false)
+    const [isAutoPicking, setIsAutoPicking] = useState(false)
     const createInFlightRef = useRef(false)
     const [isBulkImportingCodexSessions, setIsBulkImportingCodexSessions] = useState(false)
     const [isRestartingCodexDesktop, setIsRestartingCodexDesktop] = useState(false)
@@ -1526,7 +1529,7 @@ export function NewSession(props: {
     }, [suggestions, selectedIndex, moveUp, moveDown, clearSuggestions, handleSuggestionSelect])
 
     async function handleCreate() {
-        if (!machineId || !trimmedDirectory || createInFlightRef.current) return
+        if (!machineId || !trimmedDirectory || createInFlightRef.current || isAutoPicking) return
 
         createInFlightRef.current = true
         setIsCreating(true)
@@ -1763,7 +1766,41 @@ export function NewSession(props: {
         && selectedAgentAvailable
         && !isLaunchPreferenceValidationPending
         && !fastModeSelectionPending
+        && !isAutoPicking
     )
+
+    // Match exact native wire values. Do not offer remembered/manual IDs when
+    // discovery failed, nor infer included allowance from a model catalog.
+    const taskPickOptions: TaskPickOption[] = (() => {
+        // Claude's existing HAPI launch control uses native model aliases and
+        // a fixed effort catalog. Owner eligibility must separately verify them.
+        if (agent === 'claude') {
+            return MODEL_OPTIONS.claude.filter(candidate => candidate.value !== 'auto').flatMap(candidate => [
+                { model: candidate.value },
+                ...CLAUDE_EFFORT_OPTIONS.filter(candidate => candidate.value !== 'auto').map(level => ({
+                    model: candidate.value, effort: level.value, effortKind: 'effort' as const,
+                })),
+            ])
+        }
+        if (agent === 'codex' && !codexModelsState.isLoading && !codexModelsState.error) {
+            return codexModelsState.models.flatMap(candidate => [
+                { model: candidate.id },
+                ...(candidate.supportedReasoningEfforts ?? []).map(value => ({
+                    model: candidate.id, effort: value, effortKind: 'reasoning' as const,
+                })),
+            ])
+        }
+        if (agent === 'cursor' && !cursorModelsState.isLoading && !cursorModelsState.error) {
+            return [...availableCursorCatalog.wireToBase.keys()].filter(id => id !== 'auto').map(model => ({ model }))
+        }
+        if (agent === 'agy' && !agyModelsState.isLoading && !agyModelsState.error && !agyModelsState.warning) {
+            return agyModelsState.availableModels.map(candidate => ({ model: candidate.modelId }))
+        }
+        if (agent === 'copilot' && deferredDirectoryExists && !copilotModelsState.isLoading && !copilotModelsState.error) {
+            return copilotModelsState.availableModels.filter(candidate => candidate.modelId !== 'auto').map(candidate => ({ model: candidate.modelId }))
+        }
+        return []
+    })()
 
     return (
         <div className="flex flex-col divide-y divide-[var(--app-divider)] [&>div]:pr-[10px] lg:[&>div]:pr-3">
@@ -1855,6 +1892,29 @@ export function NewSession(props: {
                     onClear={() => setSelectedPiImportSessionId(null)}
                 />
             ) : null}
+            {!selectedCodexImportSession && !selectedPiImportSession ? <TaskAutoPicker
+                api={props.api} machineId={machineId} harness={agent} directory={trimmedDirectory}
+                selection={JSON.stringify([model, agySelectedModel, modelReasoningEffort, effort, serviceTier])}
+                unavailableReason={agent === 'codex' && serviceTier !== 'standard'
+                    ? 'Select Standard speed to use this experiment.'
+                    : !['codex', 'claude', 'cursor', 'agy', 'copilot'].includes(agent)
+                        ? 'This harness is not connected to the experimental picker yet. Use its model controls below.'
+                        : undefined}
+                options={taskPickOptions.slice(0, 200)}
+                disabled={isFormDisabled || !selectedAgentAvailable || (agent === 'codex' && serviceTier !== 'standard')}
+                onBusyChange={setIsAutoPicking}
+                onPick={option => {
+                    if (agent === 'agy') {
+                        agyModelPickedByUserRef.current = true
+                        setAgySelectedModel(option.model)
+                    } else {
+                        setModel(option.model)
+                        if (agent === 'cursor') setCursorSelectedBase(resolveCursorBaseFromWire(option.model, availableCursorCatalog))
+                        if (agent === 'codex') setModelReasoningEffort(option.effort ?? 'default')
+                        if (agent === 'claude') setEffort(option.effort ?? 'auto')
+                    }
+                }}
+            /> : null}
             {agent === 'dsh' ? null : agent === 'agy' ? (
                 <AgyModelSelector
                     machineId={machineId}

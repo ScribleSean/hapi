@@ -197,6 +197,8 @@ export function reduceChatBlocks(
         blocks: filterSilentGoalBlocks(dedupeAgentEvents(foldApiErrorEvents(rootResult.blocks))),
         hasReadyEvent,
         latestUsage,
-        latestGoal: getLatestThreadGoal(options.goalStateMessages ?? normalized)
+        latestGoal: agentState?.codexGoal !== undefined
+            ? agentState.codexGoal
+            : getLatestThreadGoal(options.goalStateMessages ?? normalized)
     }
 }

@@ -129,6 +129,8 @@ export const MetadataSchema = z.object({
     // Durable in-progress state for runner-backed OpenCode /clear.
     opencodeClearOperation: OpencodeClearOperationSchema.optional(),
     preferredPermissionMode: PermissionModeSchema.optional(),
+    // Native provider identity must survive runner-driven cold resumes.
+    codexModelProvider: z.string().min(1).optional(),
     preferredCopilotAgentMode: CopilotAgentModeSchema.optional(),
     flavor: z.string().nullish(),
     // Launch mode, surfaced so the web can show the agent-terminal toggle only
@@ -205,6 +207,9 @@ export type AgentStateCompletedRequest = z.infer<typeof AgentStateCompletedReque
 
 export const AgentStateSchema = z.object({
     controlledByUser: z.boolean().nullish(),
+    // Authoritative snapshot, independent of the client's paginated transcript.
+    // Undefined means unavailable; null means native Codex confirmed no goal.
+    codexGoal: z.lazy(() => ThreadGoalSchema).nullish(),
     // Current actionable shared Codex proposal; content remains in the transcript.
     codexPlanProposalId: z.string().nullish(),
     // True while the CLI is delivering a queued message into the active turn

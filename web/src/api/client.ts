@@ -63,6 +63,7 @@ import type {
 import type { AgentFlavor, MessageDeliveryMode } from '@hapi/protocol'
 import type { CancelMessageResponse, SteerQueuedMessageResponse } from '@hapi/protocol/schemas'
 import type { TranscriptionMode, TranscriptionProvider, TranscriptionProviderInfo } from '@hapi/protocol/voice'
+import type { TaskPickRequest, TaskPickResult } from '@/lib/taskPicker'
 
 export type RetryIndeterminateMessageResponse =
     | { status: 'retried' | 'already-queued' | 'retry-unavailable'; localId: string | null }
@@ -773,6 +774,16 @@ export class ApiClient {
 
     async getHubSettings(): Promise<HubSettingsResponse> {
         return await this.request<HubSettingsResponse>('/api/hub-settings')
+    }
+
+    async getTaskPickerStatus(): Promise<{ ready: boolean; reason: string | null }> {
+        return this.request('/api/experimental/task-picker/status')
+    }
+
+    async chooseTaskModel(input: TaskPickRequest): Promise<TaskPickResult> {
+        return this.request('/api/experimental/task-picker/choose', {
+            method: 'POST', body: JSON.stringify(input),
+        })
     }
 
     async updateHubSettings(settings: UpdateHubSettingsRequest): Promise<HubSettingsResponse> {

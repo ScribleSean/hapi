@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { ApiSessionClient } from '@/api/apiSession';
 import type { AgentState, Metadata } from '@/api/types';
 import type { SessionBootstrapResult } from '@/agent/sessionFactory';
@@ -15,6 +17,7 @@ vi.mock('../codexAppServerClient', () => ({
         thread = { id: 'thread', turns: [] as NativeTurn[] };
         settings: Record<string, unknown> = { model: 'mock', collaborationMode: { mode: 'default' } };
         queue: Array<{ id: string; clientUserMessageId: unknown; input: unknown }> = [];
+        goal: Record<string, unknown> | null = null;
         notify?: (method: string, params: unknown) => void;
         abandoned?: () => void;
         setNotificationHandler(handler: typeof this.notify) { this.notify = handler; }
@@ -25,6 +28,7 @@ vi.mock('../codexAppServerClient', () => ({
         isInitialized() { return this.initialized; }
         async disconnect() { this.initialized = false; }
         async request(method: string, params: Record<string, unknown> = {}) {
+            if (method === 'thread/goal/get') return { goal: this.goal };
             if (method === 'thread/read' || method === 'thread/resume') return { ...this.settings, thread: structuredClone(this.thread) };
             if (method === 'thread/list') return { data: [] };
             if (method === 'thread/queue/list') return { data: this.queue };
@@ -54,7 +58,7 @@ afterEach(async () => {
 });
 
 async function fixture() {
-    const directory = await mkdtemp('/tmp/hapi-shared-root-');
+    const directory = await mkdtemp(join(tmpdir(), 'hapi-shared-root-'));
     let state: AgentState = { steeringActive: true };
     let metadata: Metadata = { path: directory, host: 'test', flavor: 'codex' };
     let reconnect: (() => void) | null = null;
@@ -82,6 +86,7 @@ async function fixture() {
     await root.bind('thread', { model: 'mock', thread: { turns: [] } }, false);
     const native = root.client as unknown as {
         initialized: boolean;
+        goal: Record<string, unknown> | null;
         thread: { id: string; turns: NativeTurn[] };
         queue: Array<{ id: string; clientUserMessageId: string; input: unknown }>;
         notify(method: string, params: unknown): void;
@@ -89,6 +94,31 @@ async function fixture() {
     };
     return { root, native, rpc, send, metadata: () => metadata, state: () => state, updateState, reconnect: () => reconnect?.() };
 }
+
+describe('durable Codex provider and goal state', () => {
+    it('persists native provider identity and preserves it on partial settings events', async () => {
+        const f = await fixture();
+        f.root.acceptSettings({ model: 'local-model', modelProvider: 'ollama' });
+        f.root.acceptSettings({ model: 'local-model' });
+        expect(f.metadata().codexModelProvider).toBe('ollama');
+    });
+    it('reads saved goals without resuming them and persists clear notifications', async () => {
+        const f = await fixture();
+        f.native.goal = { threadId: 'thread', objective: 'Preserve my goal', status: 'paused', tokensUsed: 42 };
+        await f.root.refresh();
+        expect(f.state().codexGoal).toMatchObject({ status: 'paused', tokensUsed: 42 });
+        f.native.notify('thread/goal/updated', { threadId: 'thread', goal: { ...f.native.goal, status: 'active' } });
+        await vi.waitFor(() => expect(f.state().codexGoal?.status).toBe('active'));
+        f.native.notify('thread/goal/cleared', { threadId: 'thread' });
+        await vi.waitFor(() => expect(f.state().codexGoal).toBeNull());
+    });
+    it('ignores a goal snapshot for a different native thread', async () => {
+        const f = await fixture();
+        f.native.goal = { threadId: 'child', objective: 'Other task', status: 'active' };
+        await f.root.refresh();
+        expect(f.state().codexGoal).toBeNull();
+    });
+});
 
 async function completePlan(f: Awaited<ReturnType<typeof fixture>>, status = 'completed') {
     await f.root.applySettings({ collaborationMode: 'plan' });

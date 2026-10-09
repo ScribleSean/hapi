@@ -256,6 +256,12 @@ describe('reduceChatBlocks', () => {
         })
     })
 
+    it('keeps a native goal snapshot visible outside the loaded history window', () => {
+        const goal = { threadId: 'thread', objective: 'Saved goal', status: 'paused' as const, tokensUsed: 42, timeUsedSeconds: 10, createdAt: 1, updatedAt: 2 }
+        expect(reduceChatBlocks([], { codexGoal: goal }).latestGoal).toEqual(goal)
+        expect(reduceChatBlocks([goalMessage('old-goal', 'active', 1)], { codexGoal: null }).latestGoal).toBeNull()
+    })
+
     it('keeps a completed goal visible when it is the latest relevant event', () => {
         const reduced = reduceChatBlocks([
             goalMessage('goal-complete', 'complete', 1)
