@@ -1,20 +1,25 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { ApiSessionClient } from '@/api/apiSession';
 import type { AgentState, Metadata } from '@/api/types';
 import type { SessionBootstrapResult } from '@/agent/sessionFactory';
 import { SharedCodexRoot, type RootHost } from './root';
 import { codexPlanProposalId } from './plan';
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
+import { resolveCodexPermissionModeConfig } from '../utils/permissionModeConfig';
 
 type NativeTurn = { id: string; status: string; items: unknown[] };
 
 vi.mock('../codexAppServerClient', () => ({
     CodexAppServerClient: class {
         initialized = false;
-        thread = { id: 'thread', turns: [] as NativeTurn[] };
+        thread = { id: 'thread', historyMode: 'paginated', turns: [] as NativeTurn[] };
         settings: Record<string, unknown> = { model: 'mock', collaborationMode: { mode: 'default' } };
         queue: Array<{ id: string; clientUserMessageId: unknown; input: unknown }> = [];
+        goal: Record<string, unknown> | null = null;
+        itemGate?: Promise<void>;
         notify?: (method: string, params: unknown) => void;
         abandoned?: () => void;
         setNotificationHandler(handler: typeof this.notify) { this.notify = handler; }
@@ -25,7 +30,14 @@ vi.mock('../codexAppServerClient', () => ({
         isInitialized() { return this.initialized; }
         async disconnect() { this.initialized = false; }
         async request(method: string, params: Record<string, unknown> = {}) {
+            if (method === 'thread/goal/get') return { goal: this.goal };
             if (method === 'thread/read' || method === 'thread/resume') return { ...this.settings, thread: structuredClone(this.thread) };
+            if (method === 'thread/turns/list') return { data: this.thread.turns.map(turn => ({ ...turn, items: [] })), nextCursor: null };
+            if (method === 'thread/items/list') {
+                await this.itemGate;
+                const turn = this.thread.turns.find(value => value.id === params.turnId);
+                return { data: (turn?.items ?? []).map(item => ({ turnId: params.turnId, item })), nextCursor: null };
+            }
             if (method === 'thread/list') return { data: [] };
             if (method === 'thread/queue/list') return { data: this.queue };
             if (method === 'thread/settings/update') {
@@ -53,11 +65,12 @@ afterEach(async () => {
     finally { vi.useRealTimers(); }
 });
 
-async function fixture() {
-    const directory = await mkdtemp('/tmp/hapi-shared-root-');
+async function fixture(options: { paginated?: boolean; turns?: NativeTurn[]; itemGate?: Promise<void> } = {}) {
+    const directory = await mkdtemp(join(tmpdir(), 'hapi-shared-root-'));
     let state: AgentState = { steeringActive: true };
     let metadata: Metadata = { path: directory, host: 'test', flavor: 'codex' };
     let reconnect: (() => void) | null = null;
+    let user: ((message: { content: { text: string; attachments?: unknown[] } }, id?: string) => void) | undefined;
     const updateState = vi.fn((fn: (value: AgentState) => AgentState) => { state = fn(state); });
     const rpc = new Map<string, (raw: unknown) => Promise<unknown>>();
     const send = vi.fn();
@@ -65,7 +78,7 @@ async function fixture() {
         sessionId: 'sid', getMetadata: () => metadata,
         updateMetadata: (fn: (value: Metadata) => Metadata) => { metadata = fn(metadata); },
         updateAgentState: updateState, keepAlive() {},
-        onUserMessage() {}, onCancelQueuedMessage() {}, onRetryQueuedMessage() {},
+        onUserMessage: (fn: typeof user) => { user = fn; }, onCancelQueuedMessage() {}, onRetryQueuedMessage() {},
         onReconnect: (fn: (() => void) | null) => { reconnect = fn; },
         rpcHandlerManager: { registerHandler: (name: string, handler: (raw: unknown) => Promise<unknown>) => rpc.set(name, handler) },
         sendSessionEvent() {}, sendAgentMessage: send, emitSessionReady() {},
@@ -79,16 +92,68 @@ async function fixture() {
     } satisfies RootHost);
     cleanups.push(async () => { await root.close(false); await rm(directory, { recursive: true, force: true }); });
     await root.prepare();
-    await root.bind('thread', { model: 'mock', thread: { turns: [] } }, false);
     const native = root.client as unknown as {
         initialized: boolean;
-        thread: { id: string; turns: NativeTurn[] };
+        goal: Record<string, unknown> | null;
+        settings: Record<string, unknown>;
+        itemGate?: Promise<void>;
+        thread: { id: string; historyMode: string; turns: NativeTurn[] };
         queue: Array<{ id: string; clientUserMessageId: string; input: unknown }>;
         notify(method: string, params: unknown): void;
         abandoned(): void;
     };
-    return { root, native, rpc, send, metadata: () => metadata, state: () => state, updateState, reconnect: () => reconnect?.() };
+    if (options.turns) native.thread.turns = options.turns;
+    native.itemGate = options.itemGate;
+    await root.bind('thread', { model: 'mock', thread: { id: 'thread', ...(options.paginated ? { historyMode: 'paginated' } : {}), turns: [] } }, false);
+    return { root, native, rpc, send, user: () => user, metadata: () => metadata, state: () => state, updateState, reconnect: () => reconnect?.() };
 }
+
+describe('durable Codex provider and goal state', () => {
+    it('persists native provider identity and preserves it on partial settings events', async () => {
+        const f = await fixture();
+        f.root.acceptSettings({ model: 'local-model', modelProvider: 'ollama' });
+        f.root.acceptSettings({ model: 'local-model' });
+        expect(f.metadata().codexModelProvider).toBe('ollama');
+    });
+    it('reads saved goals without resuming them and persists clear notifications', async () => {
+        const f = await fixture();
+        f.native.goal = { threadId: 'thread', objective: 'Preserve my goal', status: 'paused', tokensUsed: 42 };
+        await f.root.refresh();
+        expect(f.state().codexGoal).toMatchObject({ status: 'paused', tokensUsed: 42 });
+        f.native.notify('thread/goal/updated', { threadId: 'thread', goal: { ...f.native.goal, status: 'active' } });
+        await vi.waitFor(() => expect(f.state().codexGoal?.status).toBe('active'));
+        f.native.notify('thread/goal/cleared', { threadId: 'thread' });
+        await vi.waitFor(() => expect(f.state().codexGoal).toBeNull());
+    });
+    it('ignores a goal snapshot for a different native thread', async () => {
+        const f = await fixture();
+        f.native.goal = { threadId: 'child', objective: 'Other task', status: 'active' };
+        await f.root.refresh();
+        expect(f.state().codexGoal).toBeNull();
+    });
+});
+
+describe('shared native permission settings', () => {
+    it.each(['default', 'read-only', 'yolo'] as const)('confirms %s only after the full native settings notification', async permissionMode => {
+        const f = await fixture();
+        await f.root.activate();
+        const request = vi.spyOn(f.root.client, 'request');
+        const expected = resolveCodexPermissionModeConfig(permissionMode);
+
+        await expect(f.rpc.get(RPC_METHODS.SetSessionConfig)!({ permissionMode })).resolves.toMatchObject({
+            applied: { permissionMode }
+        });
+
+        const update = request.mock.calls.find(([method]) => method === 'thread/settings/update');
+        expect(update?.[1]).toMatchObject({
+            threadId: 'thread', approvalPolicy: expected.approvalPolicy, sandboxPolicy: expected.sandboxPolicy
+        });
+        // The mock sends its complete observed settings object (including
+        // model), so this proves the RPC resolves from the notification rather
+        // than accepting the requested partial update optimistically.
+        expect(f.native.settings).toMatchObject({ model: 'mock', approvalPolicy: expected.approvalPolicy, sandboxPolicy: expected.sandboxPolicy });
+    });
+});
 
 async function completePlan(f: Awaited<ReturnType<typeof fixture>>, status = 'completed') {
     await f.root.applySettings({ collaborationMode: 'plan' });
@@ -182,7 +247,7 @@ describe('shared plan actions', () => {
         const started = new Promise<void>(resolve => { reading = resolve; });
         vi.spyOn(f.root.client, 'request').mockImplementation(async (method, params) => {
             const result = await request(method, params);
-            if (method === 'thread/read' && (params as { includeTurns?: boolean }).includeTurns) {
+            if (method === 'thread/turns/list') {
                 reading(); await blocked;
             }
             return result;
@@ -244,6 +309,33 @@ describe('shared plan actions', () => {
 });
 
 describe('shared steering availability', () => {
+    it('announces an active paginated root from its bounded head while holding prompts for history sync', async () => {
+        let release!: () => void;
+        const itemGate = new Promise<void>(resolve => { release = resolve; });
+        const f = await fixture({ paginated: true, itemGate, turns: [{ id: 'native-active', status: 'inProgress', items: [
+            { id: 'history', type: 'agentMessage', text: 'still loading' }
+        ] } ] });
+        const request = vi.spyOn(f.root.client, 'request');
+        await f.root.activate();
+        expect(f.state().steeringActive).toBe(true);
+        expect((f.state() as Record<string, unknown>).codexHistorySync).toBe('syncing');
+        f.user()?.({ content: { text: 'wait for native history' } }, 'held-prompt');
+        await Promise.resolve();
+        expect(request.mock.calls.some(([method]) => method === 'thread/queue/add')).toBe(false);
+        release();
+        await vi.waitFor(() => expect(request.mock.calls.some(([method]) => method === 'thread/queue/add')).toBe(true));
+        await vi.waitFor(() => expect((f.state() as Record<string, unknown>).codexHistorySync).toBeNull());
+    });
+
+    it('uses metadata-only resume before replaying bounded history after transport loss', async () => {
+        const f = await fixture();
+        const request = vi.spyOn(f.root.client, 'request');
+        f.native.initialized = false;
+        f.native.abandoned();
+        await vi.waitFor(() => expect(request.mock.calls.some(([method, params]) => method === 'thread/resume'
+            && (params as { excludeTurns?: boolean }).excludeTurns === true)).toBe(true));
+    });
+
     it('keeps idle sessions online without polling usage or publishing agent-state updates', async () => {
         const f = await fixture();
         const requests = vi.spyOn(f.root.client, 'request');

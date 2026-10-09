@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest';
+import { resolve } from 'node:path';
 import { sharedLaunchConfig } from './launch';
 import { parseCodexCliOverrides } from '../utils/codexCliOverrides';
 import { resolveCodexPermissionModeConfig } from '../utils/permissionModeConfig';
 
 describe('shared launch configuration', () => {
+    it('restores the saved provider for runner cold resumes without changing permissions', () => {
+        const result = sharedLaunchConfig({ modelProvider: 'ollama', model: 'local-model', permissionMode: 'read-only' }, '/tmp');
+        expect(result.threadParams).toMatchObject({ model: 'local-model', modelProvider: 'ollama', sandbox: 'read-only' });
+        expect(result.serverArgs).toContain('model_provider="ollama"');
+        expect(sharedLaunchConfig({ modelProvider: 'ollama', codexArgs: ['--local-provider', 'lmstudio'] }, '/tmp').threadParams.modelProvider).toBe('lmstudio');
+    });
     it.each(['default', 'read-only', 'yolo'] as const)('keeps explicit %s authoritative over native permission flags', permissionMode => {
         for (const flags of [
             ['--yolo'], ['--dangerously-bypass-approvals-and-sandbox'], ['--full-auto'],
@@ -33,8 +40,8 @@ describe('shared launch configuration', () => {
     });
     it('normalizes short flags, forwards configuration and resolves cwd exactly once', () => {
         const result = sharedLaunchConfig({ codexArgs: ['-C', 'project', '-mcustom', '-a', 'never', '--search', '--add-dir', '../extra', '-c', 'model_reasoning_effort="high"'] }, '/tmp');
-        expect(result.cwd).toBe('/tmp/project'); expect(result.tuiArgs).not.toContain('-C');
-        expect(result.threadParams).toMatchObject({ model: 'custom', approvalPolicy: 'never', config: { web_search: 'live', 'sandbox_workspace_write.writable_roots': ['/tmp/extra'] } });
+        expect(result.cwd).toBe(resolve('/tmp/project')); expect(result.tuiArgs).not.toContain('-C');
+        expect(result.threadParams).toMatchObject({ model: 'custom', approvalPolicy: 'never', config: { web_search: 'live', 'sandbox_workspace_write.writable_roots': [resolve('/tmp/extra')] } });
         expect(result.serverArgs).toContain('model_reasoning_effort="high"');
     });
     it('rejects unsupported flags before starting an execution rather than silently ignoring them', () => {
